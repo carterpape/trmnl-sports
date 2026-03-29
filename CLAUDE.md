@@ -20,9 +20,16 @@ cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.d
   wrangler.toml        # Wrangler deploy config
 ```
 
+## Publication
+
+- **GitHub:** https://github.com/CarterPape/trmnl-sports (public)
+- **TRMNL plugin ID:** 271063 (name: "Next Game")
+
 ## Cloudflare Worker
 
 Deployed at: `https://trmnl-sports.carter-pape.workers.dev`
+
+**Rate limiting:** 50 requests/minute per IP via Cloudflare Workers Rate Limiting binding (`RATE_LIMITER` in `wrangler.toml`).
 
 ### Endpoints
 
