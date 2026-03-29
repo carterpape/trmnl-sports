@@ -33,11 +33,13 @@ If you'd prefer to self-host:
 1. Get a [TheSportsDB](https://www.thesportsdb.com) API key (Patreon tier required for v2).
 2. Install [Wrangler](https://developers.cloudflare.com/workers/wrangler/): `npm install -g wrangler`
 3. Deploy:
+
    ```bash
    cd cloudflare-worker
    wrangler secret put SPORTSDB_API_KEY
    npx wrangler deploy
    ```
+
 4. Update `polling_url` and the `endpoint` in `src/settings.yml` to point to your Worker URL.
 
 ## Known limitations
