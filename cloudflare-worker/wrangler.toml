@@ -1,0 +1,12 @@
+name = "trmnl-sports"
+main = "index.js"
+compatibility_date = "2024-09-23"
+
+# Secrets (set via `wrangler secret put`, never committed):
+# - SPORTSDB_API_KEY: TheSportsDB v2 API key
+
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = {limit = 50, period = 60}

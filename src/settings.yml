@@ -1,0 +1,28 @@
+---
+strategy: polling
+no_screen_padding: 'no'
+dark_mode: 'no'
+static_data: ''
+polling_verb: get
+framework_version: 2.3.7
+serverless_language: ''
+polling_url: https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}
+polling_headers: ''
+polling_body: ''
+id: 268500
+custom_fields:
+- keyname: team_id
+  field_type: xhrSelectSearch
+  name: Team
+  endpoint: https://trmnl-sports.carter-pape.workers.dev/teams
+  exclude_csrf_token: true
+- keyname: game_type
+  field_type: select
+  options:
+  - Any Next Game: any
+  - Next Home Game: home
+  - Next Away Game: away
+  default: any
+  name: Game Filter
+name: Sports - Team's Next Game
+refresh_interval: 15

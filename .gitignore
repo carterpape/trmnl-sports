@@ -1,0 +1,17 @@
+# Local preview config (contains team IDs / secrets)
+.trmnlp.yml
+
+# Personal notes
+pape-docs/
+
+# Cloudflare wrangler cache
+cloudflare-worker/.wrangler/
+
+# Build artifacts
+src.zip
+
+# Claude Code
+.claude/
+
+# macOS
+.DS_Store
