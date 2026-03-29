@@ -9,7 +9,7 @@ serverless_language: ''
 polling_url: https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}
 polling_headers: ''
 polling_body: ''
-id: 268500
+id: 271063
 custom_fields:
 - keyname: team_id
   field_type: xhrSelectSearch
@@ -24,5 +24,5 @@ custom_fields:
   - Next Away Game: away
   default: any
   name: Game Filter
-name: Sports - Team's Next Game
+name: Next Game
 refresh_interval: 15
