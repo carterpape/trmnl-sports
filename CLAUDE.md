@@ -18,6 +18,7 @@ src/
 cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.dev)
   index.js             # Worker source — two endpoints: /teams and /next-game
   wrangler.toml        # Wrangler deploy config
+  package.json         # Worker npm deps (upng-js for badge analysis)
 ```
 
 ## Publication
@@ -29,13 +30,21 @@ cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.d
 
 Deployed at: `https://trmnl-sports.carter-pape.workers.dev`
 
-**Rate limiting:** 50 requests/minute per IP via Cloudflare Workers Rate Limiting binding (`RATE_LIMITER` in `wrangler.toml`).
+**Rate limiting:** 50 requests/minute per IP via Cloudflare Workers Rate Limiting binding (`RATE_LIMITER` in `wrangler.toml`). Tuned high to accommodate `xhrSelectSearch` keystroke fan-out (every keystroke fires a request — TRMNL provides no client-side debounce).
+
+**Response caching:** Both endpoints use `caches.default` with synthetic GET cache keys under the worker's own hostname (so POST `/teams` requests dedupe with each other). Upstream failures are not cached. TTLs: `/teams` 24h, `/next-game` 10 min (under TRMNL's 15-min poll). Caching is the primary defense against keystroke fan-out and abuse — popular team prefixes ("Chic", "New Y") stay warm across users.
+
+**CORS:** Only `/teams` returns CORS headers (it's browser-fetched via xhrSelectSearch). `/next-game` is server-polled by TRMNL and returns no CORS. `OPTIONS /next-game` returns 405.
+
+**Badge invert auto-detection:** The `/next-game` response includes `home_team_badge_invert` and `away_team_badge_invert` flags. The worker fetches each badge PNG (via `upng-js`), measures the mean luminance of opaque pixels, and flags badges above `WHITE_BADGE_LUMA_THRESHOLD` (200/255) as needing `filter: invert(1)` in templates. This catches white-on-transparent logos (e.g. Trail Blazers) that would otherwise render as invisible after `image-dither` against the device's white background. The decision is cached per badge URL for 30 days. Templates use `{% if X_team_badge_invert %}style="filter: invert(1);"{% endif %}` on each badge `<img>`.
+
+Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts white-on-transparent logos to black, but symmetrically *breaks* black-on-transparent logos (e.g. Spurs) by inverting them to invisible-white. Any single CSS transformation can only fix one polarity; per-pixel detection is the only universal fix.
 
 ### Endpoints
 
-**`GET /teams?q=SEARCH_TERM`**
+**`POST /teams` (or `GET /teams?q=SEARCH_TERM`)**
 
-- Searches TheSportsDB for teams matching the query
+- Searches TheSportsDB for teams matching the query (POST body: `{"query": "..."}`)
 - Filters to 7 supported leagues (NHL, NBA, MLB, NCAA Men's BB, NCAA Women's BB, WNBA, NWSL)
 - Returns TRMNL xhrSelectSearch format: `[{"id": "TEAM_ID|LEAGUE_ID", "name": "Team Name (League)"}]`
 - Minimum 2 characters required
@@ -50,6 +59,7 @@ Deployed at: `https://trmnl-sports.carter-pape.workers.dev`
 
 ```bash
 cd cloudflare-worker
+npm install   # if node_modules/ is missing (gitignored)
 npx wrangler deploy
 ```
 

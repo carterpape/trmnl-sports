@@ -16,6 +16,7 @@ custom_fields:
   name: Team
   endpoint: https://trmnl-sports.carter-pape.workers.dev/teams
   exclude_csrf_token: true
+  help_text: Search by city, state, or team name — not by mascot or nickname. For example, 'Golden State' returns the Warriors, but 'Warriors' does not.
 - keyname: game_type
   field_type: select
   options:
@@ -24,5 +25,11 @@ custom_fields:
   - Next Away Game: away
   default: any
   name: Game Filter
+- keyname: author_bio
+  field_type: author_bio
+  name: About this plugin
+  category: sports
+  description: Shows the next scheduled game for your favorite team across the NHL, NBA, MLB, WNBA, NWSL, and NCAA Men's & Women's Basketball. Optionally filter to home games or away games only. Powered by TheSportsDB.
+  github_url: https://github.com/CarterPape/trmnl-sports
 name: Next Game
 refresh_interval: 15

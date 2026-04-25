@@ -20,13 +20,13 @@
   <div class="grid grid--cols-1">
     <div class="row row--center">
       <div class="flex flex--col gap--xsmall no-shrink">
-        <img class="image-dither" src="{{ away_team_badge }}" height="200">
+        <img class="image-dither" src="{{ away_team_badge }}" height="200"{% if away_team_badge_invert %} style="filter: invert(1);"{% endif %}>
       </div>
       <div class="flex flex--col flex--center-y gap--xsmall" style="padding: 0 1rem;">
         <span class="value">@</span>
       </div>
       <div class="flex flex--col gap--xsmall no-shrink">
-        <img class="image-dither" src="{{ home_team_badge }}" height="200">
+        <img class="image-dither" src="{{ home_team_badge }}" height="200"{% if home_team_badge_invert %} style="filter: invert(1);"{% endif %}>
       </div>
     </div>
     <div class="row row--center">
