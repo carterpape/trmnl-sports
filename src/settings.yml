@@ -29,7 +29,7 @@ custom_fields:
   field_type: author_bio
   name: About this plugin
   category: sports
-  description: Shows the next scheduled game for your favorite team across the NHL, NBA, MLB, WNBA, NWSL, and NCAA Men's & Women's Basketball. Optionally filter to home games or away games only. Powered by TheSportsDB.
+  description: Shows the next scheduled game for your favorite team across major sports leagues — including the NHL, NBA, MLB, NFL, MLS, NCAA, WNBA, NWSL, the top European soccer leagues (EPL, La Liga, Bundesliga, Serie A, Ligue 1), AFL, NRL, IPL, and Big Bash. Optionally filter to home or away games only. Powered by TheSportsDB.
   github_url: https://github.com/CarterPape/trmnl-sports
 name: Next Game
 refresh_interval: 15

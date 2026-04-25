@@ -4,22 +4,62 @@ const API_BASE = 'https://www.thesportsdb.com/api/v2/json';
 
 // Supported league IDs (TheSportsDB internal IDs)
 const SUPPORTED_LEAGUE_IDS = new Set([
+  // North America
   4380, // NHL
   4387, // NBA
   4424, // MLB
-  4607, // NCAA Men's Basketball
-  5789, // NCAA Women's Basketball
   4516, // WNBA
   4521, // NWSL
+  4607, // NCAA Men's Basketball
+  5789, // NCAA Women's Basketball
+  4391, // NFL
+  4479, // NCAA Football (Division I)
+  4346, // MLS
+  4405, // CFL
+  // Europe (soccer)
+  4328, // English Premier League
+  4335, // Spanish La Liga
+  4331, // German Bundesliga
+  4332, // Italian Serie A
+  4334, // French Ligue 1
+  // Australia
+  4456, // AFL
+  4416, // NRL
+  // Cricket
+  4460, // Indian Premier League
+  4461, // Australian Big Bash League
 ]);
 
-// These leagues use a single calendar year as the season identifier;
-// all others use split-year format (e.g. "2025-2026").
+// Leagues that use a single calendar year as the season identifier
+// (e.g. "2026"). All others use split-year format (e.g. "2025-2026").
+// Note: TheSportsDB's choice doesn't always match a league's calendar
+// shape — NFL plays Sep–Feb but is labeled by its starting year.
 const SUMMER_LEAGUE_IDS = new Set([
   4424, // MLB
   4516, // WNBA
   4521, // NWSL
+  4391, // NFL
+  4479, // NCAA Football
+  4346, // MLS
+  4405, // CFL
+  4456, // AFL
+  4416, // NRL
+  4460, // IPL
 ]);
+
+// TheSportsDB's `strLeague` is sometimes wordy or ambiguous (e.g. "NCAA
+// Division 1" doesn't say "Football"). Override the dropdown label for
+// these to keep the team-search list scannable.
+const LEAGUE_DISPLAY_NAMES = {
+  4346: 'MLS',
+  4521: 'NWSL',
+  4479: 'NCAA Football',
+  4607: "NCAA Men's Basketball",
+  5789: "NCAA Women's Basketball",
+  4416: 'NRL',
+  4456: 'AFL',
+  4461: 'Big Bash League',
+};
 
 const TEAMS_CACHE_TTL = 86400;    // 24h — search results are stable
 const NEXT_GAME_CACHE_TTL = 600;  // 10 min — under TRMNL's 15-min poll interval
@@ -169,10 +209,13 @@ async function handleTeamsSearch(url, request, env, ctx) {
   const data = await res.json();
   const options = (data.search || [])
     .filter(team => SUPPORTED_LEAGUE_IDS.has(Number(team.idLeague)))
-    .map(team => ({
-      id: `${team.idTeam}|${team.idLeague}`,
-      name: `${team.strTeam} (${team.strLeague})`,
-    }));
+    .map(team => {
+      const leagueLabel = LEAGUE_DISPLAY_NAMES[Number(team.idLeague)] || team.strLeague;
+      return {
+        id: `${team.idTeam}|${team.idLeague}`,
+        name: `${team.strTeam} (${leagueLabel})`,
+      };
+    });
 
   const response = jsonResponse(options, { cors: true, maxAge: TEAMS_CACHE_TTL });
   ctx.waitUntil(caches.default.put(key, response.clone()));

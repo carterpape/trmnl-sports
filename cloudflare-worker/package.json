@@ -1,15 +1,26 @@
 {
-  "name": "cloudflare-worker",
+  "name": "trmnl-sports-worker",
   "version": "1.0.0",
-  "description": "",
+  "description": "Cloudflare Worker backend for the TRMNL Sports plugin. Proxies TheSportsDB v2 API for team search and next-game lookups.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "keywords": [
+    "trmnl",
+    "cloudflare-workers",
+    "thesportsdb",
+    "sports"
+  ],
+  "author": "Carter Pape",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CarterPape/trmnl-sports.git",
+    "directory": "cloudflare-worker"
+  },
+  "type": "module",
   "dependencies": {
     "upng-js": "^2.1.0"
   }

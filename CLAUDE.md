@@ -80,15 +80,40 @@ npx wrangler tail
 
 ### Supported league IDs
 
-| League | ID |
-| --- | --- |
-| NHL | 4380 |
-| NBA | 4387 |
-| MLB | 4424 |
-| NCAA Men's Basketball | 4607 |
-| NCAA Women's Basketball | 5789 |
-| WNBA | 4516 |
-| NWSL | 4521 |
+Defined in `cloudflare-worker/index.js` as `SUPPORTED_LEAGUE_IDS`. `SUMMER_LEAGUE_IDS` flags the leagues whose `strSeason` is a single calendar year (e.g. `"2026"`); everything else uses split-year (`"2025-2026"`) and falls back to the August cutoff in `getCurrentSeason`.
+
+| League                              | ID   | Season string |
+| ----------------------------------- | ---- | ------------- |
+| NHL                                 | 4380 | split         |
+| NBA                                 | 4387 | split         |
+| MLB                                 | 4424 | single        |
+| WNBA                                | 4516 | single        |
+| NWSL                                | 4521 | single        |
+| NCAA Men's Basketball               | 4607 | split         |
+| NCAA Women's Basketball             | 5789 | split         |
+| NFL                                 | 4391 | single        |
+| NCAA Division I Football            | 4479 | single        |
+| MLS                                 | 4346 | single        |
+| CFL                                 | 4405 | single        |
+| English Premier League              | 4328 | split         |
+| Spanish La Liga                     | 4335 | split         |
+| German Bundesliga                   | 4331 | split         |
+| Italian Serie A                     | 4332 | split         |
+| French Ligue 1                      | 4334 | split         |
+| AFL                                 | 4456 | single        |
+| NRL                                 | 4416 | single        |
+| Indian Premier League               | 4460 | single        |
+| Australian Big Bash League          | 4461 | split         |
+
+When adding a new league, look up `strCurrentSeason` via `https://www.thesportsdb.com/api/v1/json/3/search_all_seasons.php?id=<league_id>` (free, no key needed) to determine which set it belongs to — TheSportsDB's choice doesn't always match the league's calendar shape (NFL is single-year despite being a fall-to-winter sport).
+
+### Dropdown label overrides (`LEAGUE_DISPLAY_NAMES`)
+
+TheSportsDB's `strLeague` is sometimes wordy or ambiguous (e.g. "NCAA Division 1" without a sport, "American Major League Soccer", "Australian National Rugby League"). The worker maps these to cleaner names (`MLS`, `NRL`, `NCAA Football`, etc.) for the team-search dropdown only — internal cache keys still use the original `idLeague`. When adding a league whose `strLeague` is bad, add it to `LEAGUE_DISPLAY_NAMES`.
+
+### Cross-league fixtures (cup competitions, continental play)
+
+`/schedule/next/team/{id}` returns the team's next ~5 events across **all competitions** they're entered in, so a `game_type=any` query for a Premier League team will surface a Champions League fixture if it's their next match. The `home`/`away` paths use `/schedule/league/{leagueId}/{season}`, which is the team's primary domestic league only — so cross-league cup fixtures are invisible to those filters. There is no per-team season endpoint in TheSportsDB v2; v1 has `eventsseason.php?id=<team>` if a future fix needs it.
 
 ### Team search behavior
 
