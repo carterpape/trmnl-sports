@@ -51,8 +51,8 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 
 **`GET /next-game?team=TEAM_ID|LEAGUE_ID&type=any|home|away`**
 
-- For `type=any`: calls `/schedule/next/team/{id}` (efficient)
-- For `type=home` or `type=away`: fetches the full season schedule and filters
+- All filter modes call `/schedule/full/team/{id}` (full current-season schedule across every competition the team is entered in). The list isn't pre-sorted, so the worker filters to upcoming events and sorts ascending before picking the soonest match. Home/away filtering is done locally — see "Cross-league fixtures" below.
+- The `LEAGUE_ID` half of the team param is parsed but no longer used; it's kept for backward compatibility with stored plugin settings.
 - Returns a flat event object (see index.js `formatEvent`) when a game is found
 - When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>}`. The team badge is looked up via `/lookup/team/{id}` (cached 30 days per team) so the not-found template can still show the configured team's logo. Invert is computed via the same `shouldInvertBadge` pipeline used for found-state badges.
 
@@ -76,38 +76,35 @@ npx wrangler tail
 - **Auth:** `X-API-KEY: <key>` request header — key stored as Cloudflare secret `SPORTSDB_API_KEY` (set via `wrangler secret put SPORTSDB_API_KEY`)
 - **Key endpoints used:**
     - `GET /search/team/{name}` → `{ search: [...] }`
-    - `GET /schedule/next/team/{id}` → `{ schedule: [...] }`
-    - `GET /schedule/league/{leagueId}/{season}` → `{ schedule: [...] }`
+    - `GET /schedule/full/team/{id}` → `{ schedule: [...] }` (full current-season schedule, ~250-event cap, all competitions)
     - `GET /lookup/team/{id}` → `{ lookup: [...] }` (used for the not-found team-badge fallback)
 
 ### Supported league IDs
 
-Defined in `cloudflare-worker/index.js` as `SUPPORTED_LEAGUE_IDS`. `SUMMER_LEAGUE_IDS` flags the leagues whose `strSeason` is a single calendar year (e.g. `"2026"`); everything else uses split-year (`"2025-2026"`) and falls back to the August cutoff in `getCurrentSeason`.
+Defined in `cloudflare-worker/index.js` as `SUPPORTED_LEAGUE_IDS`.
 
-| League                              | ID   | Season string |
-| ----------------------------------- | ---- | ------------- |
-| NHL                                 | 4380 | split         |
-| NBA                                 | 4387 | split         |
-| MLB                                 | 4424 | single        |
-| WNBA                                | 4516 | single        |
-| NWSL                                | 4521 | single        |
-| NCAA Men's Basketball               | 4607 | split         |
-| NCAA Women's Basketball             | 5789 | split         |
-| NFL                                 | 4391 | single        |
-| NCAA Division I Football            | 4479 | single        |
-| MLS                                 | 4346 | single        |
-| CFL                                 | 4405 | single        |
-| English Premier League              | 4328 | split         |
-| Spanish La Liga                     | 4335 | split         |
-| German Bundesliga                   | 4331 | split         |
-| Italian Serie A                     | 4332 | split         |
-| French Ligue 1                      | 4334 | split         |
-| AFL                                 | 4456 | single        |
-| NRL                                 | 4416 | single        |
-| Indian Premier League               | 4460 | single        |
-| Australian Big Bash League          | 4461 | split         |
-
-When adding a new league, look up `strCurrentSeason` via `https://www.thesportsdb.com/api/v1/json/3/search_all_seasons.php?id=<league_id>` (free, no key needed) to determine which set it belongs to — TheSportsDB's choice doesn't always match the league's calendar shape (NFL is single-year despite being a fall-to-winter sport).
+| League                              | ID   |
+| ----------------------------------- | ---- |
+| NHL                                 | 4380 |
+| NBA                                 | 4387 |
+| MLB                                 | 4424 |
+| WNBA                                | 4516 |
+| NWSL                                | 4521 |
+| NCAA Men's Basketball               | 4607 |
+| NCAA Women's Basketball             | 5789 |
+| NFL                                 | 4391 |
+| NCAA Division I Football            | 4479 |
+| MLS                                 | 4346 |
+| CFL                                 | 4405 |
+| English Premier League              | 4328 |
+| Spanish La Liga                     | 4335 |
+| German Bundesliga                   | 4331 |
+| Italian Serie A                     | 4332 |
+| French Ligue 1                      | 4334 |
+| AFL                                 | 4456 |
+| NRL                                 | 4416 |
+| Indian Premier League               | 4460 |
+| Australian Big Bash League          | 4461 |
 
 ### Dropdown label overrides (`LEAGUE_DISPLAY_NAMES`)
 
@@ -115,7 +112,7 @@ TheSportsDB's `strLeague` is sometimes wordy or ambiguous (e.g. "NCAA Division 1
 
 ### Cross-league fixtures (cup competitions, continental play)
 
-`/schedule/next/team/{id}` returns the team's next ~5 events across **all competitions** they're entered in, so a `game_type=any` query for a Premier League team will surface a Champions League fixture if it's their next match. The `home`/`away` paths use `/schedule/league/{leagueId}/{season}`, which is the team's primary domestic league only — so cross-league cup fixtures are invisible to those filters. There is no per-team season endpoint in TheSportsDB v2; v1 has `eventsseason.php?id=<team>` if a future fix needs it.
+All three filter modes (`any`/`home`/`away`) hit `/schedule/full/team/{id}`, which returns the team's full current-season schedule across every competition they're entered in (cup, continental, etc.). Home/away filtering happens locally, so cross-league fixtures stay visible regardless of filter — and "next home game" can find a match anywhere in the remaining season, not just within the next handful of events.
 
 ### Team search behavior
 

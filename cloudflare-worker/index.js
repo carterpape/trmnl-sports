@@ -30,23 +30,6 @@ const SUPPORTED_LEAGUE_IDS = new Set([
   4461, // Australian Big Bash League
 ]);
 
-// Leagues that use a single calendar year as the season identifier
-// (e.g. "2026"). All others use split-year format (e.g. "2025-2026").
-// Note: TheSportsDB's choice doesn't always match a league's calendar
-// shape — NFL plays Sep–Feb but is labeled by its starting year.
-const SUMMER_LEAGUE_IDS = new Set([
-  4424, // MLB
-  4516, // WNBA
-  4521, // NWSL
-  4391, // NFL
-  4479, // NCAA Football
-  4346, // MLS
-  4405, // CFL
-  4456, // AFL
-  4416, // NRL
-  4460, // IPL
-]);
-
 // TheSportsDB's `strLeague` is sometimes wordy or ambiguous (e.g. "NCAA
 // Division 1" doesn't say "Football"). Override the dropdown label for
 // these to keep the team-search list scannable.
@@ -81,18 +64,6 @@ const TEAM_BADGE_CACHE_TTL = 30 * 86400; // 30 days
 // considered "white-on-transparent" and templates should invert it so it
 // renders as dark-on-white on e-ink.
 const WHITE_BADGE_LUMA_THRESHOLD = 200;
-
-function getCurrentSeason(leagueId) {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth() + 1; // 1–12
-
-  if (SUMMER_LEAGUE_IDS.has(Number(leagueId))) {
-    return String(year);
-  }
-  // Fall/winter/spring leagues: new season starts in August
-  return month >= 8 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
-}
 
 function jsonResponse(data, { status = 200, cors = false, maxAge = 0 } = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -264,12 +235,21 @@ async function handleTeamsSearch(url, request, env, ctx) {
 
 // GET /next-game?team=TEAM_ID|LEAGUE_ID&type=any|home|away
 // Returns the next matching game for the given team, or { found: false }.
+//
+// All three filters use /schedule/full/team/{id}, which returns the team's
+// full current-season schedule (~250-event cap) across every competition
+// they're entered in — including cup and continental fixtures. Home/away
+// filtering is done locally so cross-league matches stay visible regardless
+// of filter, and we can find the next home/away match anywhere in the
+// season rather than just within the next handful of events.
 async function handleNextGame(url, env, ctx) {
   const teamParam = url.searchParams.get('team') || '';
   const type = url.searchParams.get('type') || 'any';
 
-  const [teamId, leagueId] = teamParam.split('|');
-  if (!teamId || !leagueId) {
+  // The leagueId half is kept for backward compatibility with stored settings
+  // but is no longer needed for the lookup.
+  const [teamId] = teamParam.split('|');
+  if (!teamId) {
     return jsonResponse({ found: false });
   }
 
@@ -277,47 +257,27 @@ async function handleNextGame(url, env, ctx) {
   const cached = await caches.default.match(key);
   if (cached) return cached;
 
-  let upstreamOk = false;
-  let event = null;
-
-  if (type === 'any') {
-    // Use the efficient "next events for team" endpoint
-    const res = await fetch(
-      `${API_BASE}/schedule/next/team/${teamId}`,
-      { headers: { 'X-API-KEY': env.SPORTSDB_API_KEY } },
-    );
-    if (res.ok) {
-      upstreamOk = true;
-      const data = await res.json();
-      event = data.schedule?.find(isUpcoming) || null;
-    }
-  } else {
-    // For home/away filtering, fetch the full season schedule for the league
-    const season = getCurrentSeason(leagueId);
-    const res = await fetch(
-      `${API_BASE}/schedule/league/${leagueId}/${season}`,
-      { headers: { 'X-API-KEY': env.SPORTSDB_API_KEY } },
-    );
-    if (res.ok) {
-      upstreamOk = true;
-      const data = await res.json();
-      const matching = (data.schedule || [])
-        .filter(e => {
-          if (!isUpcoming(e)) return false;
-          if (type === 'home') return String(e.idHomeTeam) === String(teamId);
-          if (type === 'away') return String(e.idAwayTeam) === String(teamId);
-          return false;
-        })
-        .sort((a, b) =>
-          a.dateEvent.localeCompare(b.dateEvent) ||
-          (a.strTime || '').localeCompare(b.strTime || ''),
-        );
-      event = matching[0] || null;
-    }
-  }
-
+  const res = await fetch(
+    `${API_BASE}/schedule/full/team/${teamId}`,
+    { headers: { 'X-API-KEY': env.SPORTSDB_API_KEY } },
+  );
   // Don't cache upstream failures — let the next request retry immediately.
-  if (!upstreamOk) return jsonResponse({ found: false });
+  if (!res.ok) return jsonResponse({ found: false });
+
+  const data = await res.json();
+  // /schedule/full/team is not chronologically ordered — sort ascending so
+  // .find() picks the soonest matching event.
+  const upcoming = (data.schedule || [])
+    .filter(isUpcoming)
+    .sort((a, b) =>
+      (a.dateEvent || '').localeCompare(b.dateEvent || '') ||
+      (a.strTime || '').localeCompare(b.strTime || ''),
+    );
+  const event = upcoming.find(e => {
+    if (type === 'home') return String(e.idHomeTeam) === String(teamId);
+    if (type === 'away') return String(e.idAwayTeam) === String(teamId);
+    return true;
+  }) || null;
 
   let payload;
   if (event) {
