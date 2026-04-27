@@ -136,5 +136,4 @@ custom_fields:
 ## Known open items
 
 - **Logo centering** — logos with varying amounts of transparent padding can make the `@` symbol appear off-center. See `0067 Claude diary 2026-03-29.md` for the plan (CSS-first, then weserv.nl trim proxy if needed).
-- **Timestamp timezone** — `strTimestamp` from TheSportsDB is treated as UTC (Worker appends `+00:00`). If game times display incorrectly, this assumption may be wrong.
 - **League allowlist** — `SUPPORTED_LEAGUE_IDS` may be loosened in the future to allow any TheSportsDB team.
