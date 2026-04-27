@@ -17,10 +17,8 @@ A [TRMNL](https://usetrmnl.com) plugin that shows your favorite team's next sche
 ## Setup
 
 1. Install **Next Game** from the TRMNL plugin marketplace.
-2. In the plugin settings, type your team's **city name** or full team-name prefix in the **Team** field — for example, `Chicago` or `Golden State` — then select your team from the dropdown.
+2. In the plugin settings, type your team's **city, team name, or mascot** in the **Team** field — `Chicago`, `Bulls`, and `Chicago Bulls` all return the Bulls — then select your team from the dropdown.
 3. Choose a **Game Filter**: any next game, next home game, or next away game.
-
-> **Search tip:** TheSportsDB matches on city or team name prefix, not nicknames. Search for `Chicago` (not `Bulls`) or `Golden State` (not `Warriors`).
 
 ## Supported leagues
 
@@ -70,9 +68,8 @@ If your league isn't here, please [open an issue](https://github.com/CarterPape/
 
 The plugin polls a small [Cloudflare Worker](cloudflare-worker/index.js) at `trmnl-sports.carter-pape.workers.dev`, which in turn calls [TheSportsDB v2 API](https://www.thesportsdb.com). The Worker:
 
-- Filters team-search results to the supported leagues (so you don't pick a team this plugin can't actually display).
-- Computes the current season string per league (split-year leagues like the NHL vs. single-year leagues like MLB are handled differently).
-- Caches both team-search and next-game responses to keep TheSportsDB load (and your TRMNL polling) light.
+- Maintains a local index of every team across the supported leagues (~1,100 teams), refreshed daily. Team search is a substring scan against that index, so mascot-only queries like `Bulls` work — and TheSportsDB only sees ~20 calls per day instead of one per keystroke.
+- Caches the team index and the next-game response per team to keep TheSportsDB load light.
 - Pre-computes a per-badge "needs inversion" flag by sampling each team logo's pixel luminance, so the templates can render white-on-transparent badges visibly.
 
 If you'd rather host the Worker yourself — for instance, to use your own TheSportsDB API key — see [Self-hosting](#self-hosting) below.

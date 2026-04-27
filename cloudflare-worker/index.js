@@ -44,8 +44,10 @@ const LEAGUE_DISPLAY_NAMES = {
   4461: 'Big Bash League',
 };
 
-const TEAMS_CACHE_TTL = 86400;    // 24h — search results are stable
-const NEXT_GAME_CACHE_TTL = 600;  // 10 min — under TRMNL's 15-min poll interval
+const TEAMS_CACHE_TTL = 86400;       // 24h — per-query search response cache
+const TEAM_INDEX_CACHE_TTL = 86400;  // 24h — full team list across supported leagues
+const NEXT_GAME_CACHE_TTL = 600;     // 10 min — under TRMNL's 15-min poll interval
+const MAX_SEARCH_RESULTS = 20;
 
 // TheSportsDB keeps recently-finished games in its "next events" response for
 // some window. Treat a game as still upcoming until this long after kickoff,
@@ -192,43 +194,111 @@ function buildCacheKey(workerHostname, path, params) {
   return new Request(`https://${workerHostname}/_cache${path}?${search}`, { method: 'GET' });
 }
 
+// Fetch and cache the full team index across all supported leagues. SportsDB's
+// /search/team/ only matches city/team-name prefix — typing "Bulls" won't find
+// Chicago Bulls. We work around this by maintaining a local index of every
+// supported team and doing substring matching against it.
+//
+// Side benefit: per-keystroke fan-out to SportsDB disappears. After warmup,
+// each Cloudflare POP only refreshes the index ~21 times per 24h.
+async function getTeamIndex(env, hostname, ctx) {
+  const key = buildCacheKey(hostname, '/_team-index', {});
+  const cached = await caches.default.match(key);
+  if (cached) return await cached.json();
+
+  const leagueIds = [...SUPPORTED_LEAGUE_IDS];
+  const results = await Promise.allSettled(
+    leagueIds.map(id =>
+      fetch(`${API_BASE}/list/teams/${id}`, {
+        headers: { 'X-API-KEY': env.SPORTSDB_API_KEY },
+      }).then(r => (r.ok ? r.json() : null)),
+    ),
+  );
+
+  const index = [];
+  let anySucceeded = false;
+  results.forEach((result, i) => {
+    const id = leagueIds[i];
+    if (result.status !== 'fulfilled' || !result.value) return;
+    const teams = result.value.list || result.value.teams || [];
+    if (teams.length === 0) return;
+    anySucceeded = true;
+    const leagueLabel = LEAGUE_DISPLAY_NAMES[id] || teams[0].strLeague || '';
+    for (const team of teams) {
+      const strTeam = team.strTeam || '';
+      const strTeamAlternate = team.strTeamAlternate || '';
+      const strKeywords = team.strKeywords || '';
+      index.push({
+        idTeam: team.idTeam,
+        idLeague: team.idLeague,
+        strTeam,
+        leagueLabel,
+        searchBlob: `${strTeam} | ${strTeamAlternate} | ${strKeywords}`.toLowerCase(),
+      });
+    }
+  });
+
+  // If every league failed, don't poison the cache with an empty index.
+  if (!anySucceeded) return [];
+
+  const cacheResponse = new Response(JSON.stringify(index), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': `public, max-age=${TEAM_INDEX_CACHE_TTL}`,
+    },
+  });
+  ctx.waitUntil(caches.default.put(key, cacheResponse.clone()));
+  return index;
+}
+
+// Rank a match: 0 = team name starts with query, 1 = any whitespace token in
+// team name starts with query (catches "Bulls" → "Chicago Bulls"), 2 = match
+// only via substring or alternate/keyword fields.
+function matchRank(team, q) {
+  const name = team.strTeam.toLowerCase();
+  if (name.startsWith(q)) return 0;
+  for (const token of name.split(/\s+/)) {
+    if (token.startsWith(q)) return 1;
+  }
+  return 2;
+}
+
 // GET /teams?q=SEARCH_TERM  (or POST with JSON body { query: "..." })
 // Returns teams matching the query, filtered to supported leagues,
-// in TRMNL xhrSelectSearch format.
+// in TRMNL xhrSelectSearch format. Matches against team name, alternate name,
+// and keywords via the cached team index — no upstream call per request.
 async function handleTeamsSearch(url, request, env, ctx) {
-  let q = (url.searchParams.get('q') || '').trim();
-  if (!q && request.method === 'POST') {
+  let qRaw = (url.searchParams.get('q') || '').trim();
+  if (!qRaw && request.method === 'POST') {
     try {
       const body = await request.json();
-      q = (body.query || body.q || '').trim();
+      qRaw = (body.query || body.q || '').trim();
     } catch {}
   }
-  if (q.length < 2) {
+  if (qRaw.length < 2) {
     return jsonResponse([], { cors: true });
   }
+  const q = qRaw.toLowerCase();
 
-  const key = buildCacheKey(url.hostname, '/teams', { q: q.toLowerCase() });
+  const key = buildCacheKey(url.hostname, '/teams', { q });
   const cached = await caches.default.match(key);
   if (cached) return cached;
 
-  const res = await fetch(
-    `${API_BASE}/search/team/${encodeURIComponent(q)}`,
-    { headers: { 'X-API-KEY': env.SPORTSDB_API_KEY } },
-  );
-  if (!res.ok) return jsonResponse([], { cors: true });
+  const index = await getTeamIndex(env, url.hostname, ctx);
+  const matches = index
+    .filter(t => t.searchBlob.includes(q))
+    .map(t => ({ team: t, rank: matchRank(t, q) }))
+    .sort((a, b) =>
+      a.rank - b.rank ||
+      a.team.strTeam.localeCompare(b.team.strTeam),
+    )
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map(({ team }) => ({
+      id: `${team.idTeam}|${team.idLeague}`,
+      name: `${team.strTeam} (${team.leagueLabel})`,
+    }));
 
-  const data = await res.json();
-  const options = (data.search || [])
-    .filter(team => SUPPORTED_LEAGUE_IDS.has(Number(team.idLeague)))
-    .map(team => {
-      const leagueLabel = LEAGUE_DISPLAY_NAMES[Number(team.idLeague)] || team.strLeague;
-      return {
-        id: `${team.idTeam}|${team.idLeague}`,
-        name: `${team.strTeam} (${leagueLabel})`,
-      };
-    });
-
-  const response = jsonResponse(options, { cors: true, maxAge: TEAMS_CACHE_TTL });
+  const response = jsonResponse(matches, { cors: true, maxAge: TEAMS_CACHE_TTL });
   ctx.waitUntil(caches.default.put(key, response.clone()));
   return response;
 }

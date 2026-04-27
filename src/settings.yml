@@ -16,7 +16,7 @@ custom_fields:
   name: Team
   endpoint: https://trmnl-sports.carter-pape.workers.dev/teams
   exclude_csrf_token: true
-  help_text: Search by city, state, or team name — not by mascot or nickname. For example, 'Golden State' returns the Warriors, but 'Warriors' does not.
+  help_text: Search by city, team name, or mascot. For example, 'Chicago', 'Bulls', and 'Chicago Bulls' all return the Bulls.
 - keyname: game_type
   field_type: select
   options:

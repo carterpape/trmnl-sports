@@ -32,7 +32,7 @@ Deployed at: `https://trmnl-sports.carter-pape.workers.dev`
 
 **Rate limiting:** 50 requests/minute per IP via Cloudflare Workers Rate Limiting binding (`RATE_LIMITER` in `wrangler.toml`). Tuned high to accommodate `xhrSelectSearch` keystroke fan-out (every keystroke fires a request — TRMNL provides no client-side debounce).
 
-**Response caching:** Both endpoints use `caches.default` with synthetic GET cache keys under the worker's own hostname (so POST `/teams` requests dedupe with each other). Upstream failures are not cached. TTLs: `/teams` 24h, `/next-game` 10 min (under TRMNL's 15-min poll). Caching is the primary defense against keystroke fan-out and abuse — popular team prefixes ("Chic", "New Y") stay warm across users.
+**Response caching:** Both endpoints use `caches.default` with synthetic GET cache keys under the worker's own hostname (so POST `/teams` requests dedupe with each other). Upstream failures are not cached. TTLs: `/teams` per-query response 24h; team index 24h; `/next-game` 10 min (under TRMNL's 15-min poll). After the index is warm, `/teams` does zero upstream calls per request — the only SportsDB hits are the ~20 parallel `/list/teams/{id}` calls during a per-POP index refresh.
 
 **CORS:** Only `/teams` returns CORS headers (it's browser-fetched via xhrSelectSearch). `/next-game` is server-polled by TRMNL and returns no CORS. `OPTIONS /next-game` returns 405.
 
@@ -44,8 +44,9 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 
 **`POST /teams` (or `GET /teams?q=SEARCH_TERM`)**
 
-- Searches TheSportsDB for teams matching the query (POST body: `{"query": "..."}`)
-- Filters to the supported leagues listed in `SUPPORTED_LEAGUE_IDS` (see "Supported league IDs" below)
+- Searches the locally cached team index for teams matching the query (POST body: `{"query": "..."}`). The index is built lazily on first request from `/list/teams/{id}` for every league in `SUPPORTED_LEAGUE_IDS`, then cached 24h per Cloudflare POP.
+- Case-insensitive substring match against `strTeam`, `strTeamAlternate`, and `strKeywords`. Catches mascot-only queries that SportsDB's `/search/team/` would miss (e.g. "Bulls" → Chicago Bulls).
+- Results ranked: (1) team-name prefix match, (2) any team-name token prefix match, (3) substring/alternate/keyword match. Tiebreak alphabetical. Capped at `MAX_SEARCH_RESULTS` (20).
 - Returns TRMNL xhrSelectSearch format: `[{"id": "TEAM_ID|LEAGUE_ID", "name": "Team Name (League)"}]`
 - Minimum 2 characters required
 
@@ -75,9 +76,10 @@ npx wrangler tail
 - **Version:** v2 (`https://www.thesportsdb.com/api/v2/json`)
 - **Auth:** `X-API-KEY: <key>` request header — key stored as Cloudflare secret `SPORTSDB_API_KEY` (set via `wrangler secret put SPORTSDB_API_KEY`)
 - **Key endpoints used:**
-    - `GET /search/team/{name}` → `{ search: [...] }`
+    - `GET /list/teams/{league_id}` → `{ list: [...] }` (used to build the team-search index; 20 parallel calls per index refresh)
     - `GET /schedule/full/team/{id}` → `{ schedule: [...] }` (full current-season schedule, ~250-event cap, all competitions)
     - `GET /lookup/team/{id}` → `{ lookup: [...] }` (used for the not-found team-badge fallback)
+    - Note: `GET /search/team/{name}` is no longer used — its prefix-only matching missed mascot queries. See "Team search behavior" below.
 
 ### Supported league IDs
 
@@ -116,7 +118,11 @@ All three filter modes (`any`/`home`/`away`) hit `/schedule/full/team/{id}`, whi
 
 ### Team search behavior
 
-TheSportsDB search matches on team name prefix or city name — it does **not** fuzzy-match nicknames. "Chicago" works (returns Bulls, Blackhawks, Cubs, etc.); "Bulls" does not. "Golden State" works; "Warriors" does not. Users should type city name or full team name prefix.
+The worker maintains a local index of every team across `SUPPORTED_LEAGUE_IDS` (built from `/list/teams/{id}`, ~1100 teams total, cached 24h per POP). Search is a case-insensitive substring scan against `strTeam`, `strTeamAlternate`, and `strKeywords`. Mascot-only queries work ("Bulls" → Chicago Bulls; "Warriors" → Golden State Warriors), as do city queries ("Chic" → all Chicago teams) and full-name queries.
+
+Why not SportsDB's `/search/team/`: it only matches on team-name prefix or city. Even v1's "matches alternate names" doesn't help — Chicago Bulls' record has empty `strTeamAlternate` and `strKeywords`, so no SportsDB endpoint returns it for "Bulls".
+
+Caveat: substring matching can produce odd hits (e.g. "xy" matches "Galaxy"). The 2-char minimum keeps this manageable.
 
 ## TRMNL plugin settings
 
