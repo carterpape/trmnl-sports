@@ -29,7 +29,7 @@ custom_fields:
   field_type: author_bio
   name: About this plugin
   category: sports
-  description: Shows the next scheduled game for your favorite team across major sports leagues — including the NHL, NBA, MLB, NFL, MLS, NCAA, WNBA, NWSL, the top European soccer leagues (EPL, La Liga, Bundesliga, Serie A, Ligue 1), AFL, NRL, IPL, and Big Bash. Optionally filter to home or away games only. Powered by TheSportsDB.
+  description: Shows the next scheduled game for teams across major sports leagues, including:<br><br> • North American professional sports (NFL, NBA, NHL, MLB, MLS, WNBA, NWSL)<br> • College football and basketball<br> • Top European soccer leagues (EPL, La Liga, Bundesliga, Serie A, Ligue 1)<br> • Aussie leagues (AFL, NRL, Big Bash)<br> • Indian Premier League<br><br> Optionally filter to only see home or away games.
   github_url: https://github.com/CarterPape/trmnl-sports
 name: Next Game
 refresh_interval: 15
