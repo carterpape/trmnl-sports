@@ -118,7 +118,6 @@ custom_fields:
 - The plugin shows one upcoming game at a time — not a full schedule.
 - Game times come from TheSportsDB; a small fraction of events arrive without a precise time, in which case only the date is shown.
 - After a game finishes, it stays on screen for up to four hours before the plugin advances to the next game (TheSportsDB occasionally lags on marking events complete).
-- For European soccer teams, the **Any Next Game** filter naturally includes cup and continental fixtures (e.g. UEFA Champions League). The **Next Home Game** / **Next Away Game** filters currently only consider matches in the team's primary domestic league, so a Champions League home match won't surface there.
 
 ## Issues and contributions
 
