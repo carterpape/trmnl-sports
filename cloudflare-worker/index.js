@@ -73,6 +73,10 @@ const UPCOMING_GRACE_MS = 4 * 60 * 60 * 1000;
 // rarely change. Looked up via caches.default; recomputed on cache miss.
 const BADGE_INVERT_CACHE_TTL = 30 * 86400; // 30 days
 
+// Cache the team-badge lookup separately from the not-found response so that
+// many not-found responses share a single team lookup.
+const TEAM_BADGE_CACHE_TTL = 30 * 86400; // 30 days
+
 // Mean luminance threshold (0–255). Above this, a badge's visible pixels are
 // considered "white-on-transparent" and templates should invert it so it
 // renders as dark-on-white on e-ink.
@@ -159,6 +163,42 @@ async function shouldInvertBadge(url, hostname, ctx) {
   });
   ctx.waitUntil(caches.default.put(key, cacheResponse.clone()));
   return invert;
+}
+
+// Look up a team's badge URL by team ID. Used to populate the not-found
+// response so the layout can still show the configured team's logo. Cached
+// per team ID for 30 days; team badges change rarely.
+async function fetchTeamBadge(teamId, env, hostname, ctx) {
+  if (!teamId) return null;
+
+  const key = buildCacheKey(hostname, '/_team-badge', { teamId });
+  const cached = await caches.default.match(key);
+  if (cached) {
+    const text = await cached.text();
+    return text ? text : null;
+  }
+
+  let badge = null;
+  try {
+    const res = await fetch(
+      `${API_BASE}/lookup/team/${teamId}`,
+      { headers: { 'X-API-KEY': env.SPORTSDB_API_KEY } },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const team = data.lookup?.[0] || data.teams?.[0];
+      badge = team?.strBadge || null;
+    }
+  } catch {
+    // Lookup failed — fall through with badge = null.
+  }
+
+  // Cache the result either way so failures don't refetch repeatedly.
+  const cacheResponse = new Response(badge || '', {
+    headers: { 'Cache-Control': `public, max-age=${TEAM_BADGE_CACHE_TTL}` },
+  });
+  ctx.waitUntil(caches.default.put(key, cacheResponse.clone()));
+  return badge;
 }
 
 function isUpcoming(event) {
@@ -287,7 +327,13 @@ async function handleNextGame(url, env, ctx) {
     ]);
     payload = formatEvent(event, { homeInvert, awayInvert });
   } else {
-    payload = { found: false };
+    const badge = await fetchTeamBadge(teamId, env, url.hostname, ctx);
+    const invert = badge ? await shouldInvertBadge(badge, url.hostname, ctx) : false;
+    payload = {
+      found: false,
+      team_badge: badge,
+      team_badge_invert: invert,
+    };
   }
 
   const response = jsonResponse(payload, { maxAge: NEXT_GAME_CACHE_TTL });

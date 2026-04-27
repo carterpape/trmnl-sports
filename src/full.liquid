@@ -1,16 +1,16 @@
 {% unless found %}
 <div class="layout gap--large">
   <div class="grid grid--cols-1">
+    {% if team_badge %}
+    <div class="row row--center">
+      <div class="flex flex--col no-shrink">
+        <img class="image-dither" src="{{ team_badge }}" height="200"{% if team_badge_invert %} style="filter: invert(1);"{% endif %}>
+      </div>
+    </div>
+    {% endif %}
     <div class="row row--center">
       <div class="flex flex--col no-shrink">
         <span class="value">No game found</span>
-        <span class="value value--small">
-          {% assign filter = trmnl.plugin_settings.custom_fields_values.game_type %}
-          {% if filter == 'home' %}No next home game scheduled.
-          {% elsif filter == 'away' %}No next away game scheduled.
-          {% else %}No next game scheduled.
-          {% endif %}
-        </span>
       </div>
     </div>
   </div>

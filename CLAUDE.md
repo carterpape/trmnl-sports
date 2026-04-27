@@ -45,7 +45,7 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 **`POST /teams` (or `GET /teams?q=SEARCH_TERM`)**
 
 - Searches TheSportsDB for teams matching the query (POST body: `{"query": "..."}`)
-- Filters to 7 supported leagues (NHL, NBA, MLB, NCAA Men's BB, NCAA Women's BB, WNBA, NWSL)
+- Filters to the supported leagues listed in `SUPPORTED_LEAGUE_IDS` (see "Supported league IDs" below)
 - Returns TRMNL xhrSelectSearch format: `[{"id": "TEAM_ID|LEAGUE_ID", "name": "Team Name (League)"}]`
 - Minimum 2 characters required
 
@@ -53,7 +53,8 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 
 - For `type=any`: calls `/schedule/next/team/{id}` (efficient)
 - For `type=home` or `type=away`: fetches the full season schedule and filters
-- Returns a flat event object (see index.js `formatEvent`) or `{"found": false}`
+- Returns a flat event object (see index.js `formatEvent`) when a game is found
+- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>}`. The team badge is looked up via `/lookup/team/{id}` (cached 30 days per team) so the not-found template can still show the configured team's logo. Invert is computed via the same `shouldInvertBadge` pipeline used for found-state badges.
 
 ### Redeploy after changes
 
@@ -77,6 +78,7 @@ npx wrangler tail
     - `GET /search/team/{name}` → `{ search: [...] }`
     - `GET /schedule/next/team/{id}` → `{ schedule: [...] }`
     - `GET /schedule/league/{leagueId}/{season}` → `{ schedule: [...] }`
+    - `GET /lookup/team/{id}` → `{ lookup: [...] }` (used for the not-found team-badge fallback)
 
 ### Supported league IDs
 
@@ -138,4 +140,4 @@ custom_fields:
 
 - **Logo centering** — logos with varying amounts of transparent padding can make the `@` symbol appear off-center. See `0067 Claude diary 2026-03-29.md` for the plan (CSS-first, then weserv.nl trim proxy if needed).
 - **Timestamp timezone** — `strTimestamp` from TheSportsDB is treated as UTC (Worker appends `+00:00`). If game times display incorrectly, this assumption may be wrong.
-- **7-league filter** — may be loosened in the future to allow any TheSportsDB team.
+- **League allowlist** — `SUPPORTED_LEAGUE_IDS` may be loosened in the future to allow any TheSportsDB team.
