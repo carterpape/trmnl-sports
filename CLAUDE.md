@@ -53,10 +53,10 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 **`GET /next-game?team=TEAM_ID|LEAGUE_ID&type=any|home|away&locale=LOCALE&tz=IANA_TZ`**
 
 - All filter modes call `/schedule/full/team/{id}` (full current-season schedule across every competition the team is entered in). The list isn't pre-sorted, so the worker filters to upcoming events and sorts ascending before picking the soonest match. Home/away filtering is done locally — see "Cross-league fixtures" below.
-- The `LEAGUE_ID` half of the team param is parsed but no longer used; it's kept for backward compatibility with stored plugin settings.
+- The `LEAGUE_ID` half of the team param drives the `team_league_label` shown in the title bar (mapped through `LEAGUE_DISPLAY_NAMES`, falling back to the team's `strLeague` via the team-meta lookup). Using the URL's leagueId rather than the next event's `strLeague` keeps the label stable across cup/continental fixtures.
 - `locale` and `tz` are passed through from `{{ trmnl.user.locale }}` / `{{ trmnl.user.time_zone_iana }}`. The worker uses them to localize `date_label` ("Today", "Heute", "Wednesday, May 1") and `time_label` ("7:00 p.m.", "19:00") on the server, so templates render the strings as-is. Both have a placeholder guard — a literal `{{...}}` string from un-interpolated template syntax falls back to en-US/UTC.
-- Returns a flat event object (see index.js `formatEvent`) when a game is found, including pre-localized `date_label`/`time_label` plus the raw `start_utc_timestamp`.
-- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>, "not_found_message": "..."}`. The team badge is looked up via `/lookup/team/{id}` (cached 30 days per team). `not_found_message` is the localized "No game found" string keyed off the locale's language code (`NOT_FOUND_MESSAGES` table; falls back to English).
+- Returns a flat event object (see index.js `formatEvent`) when a game is found, including pre-localized `date_label`/`time_label`, the raw `start_utc_timestamp`, and the configured team's `team_name` (resolved by matching `idHomeTeam`/`idAwayTeam` against the URL's teamId) plus `team_league_label`.
+- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>, "team_name": "...", "team_league_label": "...", "not_found_message": "..."}`. Team badge, name, and league are looked up via `/lookup/team/{id}` and cached 30 days under cache key `/_team-meta` (returned as a `{badge, name, idLeague, strLeague}` JSON blob — see `fetchTeamMeta`). `not_found_message` is the localized "No game found" string keyed off the locale's language code (`NOT_FOUND_MESSAGES` table; falls back to English).
 
 ### Redeploy after changes
 
@@ -130,7 +130,7 @@ Caveat: substring matching can produce odd hits (e.g. "xy" matches "Galaxy"). Th
 - **Team** (`team_id`): `xhrSelectSearch` — calls Worker `/teams?q=` as user types. Stores composite `"TEAM_ID|LEAGUE_ID"` as the value.
 - **Game Filter** (`game_type`): static select — `any` / `home` / `away`
 - **Polling URL:** `https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}&locale={{ trmnl.user.locale }}&tz={{ trmnl.user.time_zone_iana }}`
-- **Title bar:** All four layouts include a `title_bar` sibling to `layout` showing the TRMNL render icon and "Next Game" — required by TRMNL plugin guidelines and reviewed-in by David's email feedback (2026-04-26).
+- **Title bar:** All four layouts include a `title_bar` sibling to `layout` with `<span class="title">Next Game</span>` plus a per-instance `<span class="instance">` carrying the configured team. `full` and `half_horizontal` show `{{ team_name }} ({{ team_league_label }})`; `half_vertical` and `quadrant` drop the league to avoid overflow with long names. No icon — TRMNL's [recipe-publishing tips](https://trmnl.com/blog/plugin-recipe-publishing-tips) explicitly warn against using the default `trmnl--render.svg`, and the framework docs don't require a title-bar icon. The title bar was originally added in response to David's recipe-review feedback (2026-04-26 email, archived at `pape-docs/0070 TRMNL David recipe-review feedback.md`).
 - **Refresh interval:** 15 minutes
 
 ## Local preview `.trmnlp.yml`

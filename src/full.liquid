@@ -38,6 +38,6 @@
 </div>
 {% endunless %}
 <div class="title_bar">
-  <img class="image" src="https://usetrmnl.com/images/plugins/trmnl--render.svg">
   <span class="title">Next Game</span>
+  {% if team_name %}<span class="instance">{{ team_name }}{% if team_league_label %} ({{ team_league_label }}){% endif %}</span>{% endif %}
 </div>
