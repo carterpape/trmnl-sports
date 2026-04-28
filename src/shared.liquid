@@ -1,34 +1,4 @@
 {% template date_time %}
-  {% assign game_epoch = start_utc_timestamp | date: "%s" | plus: 0 %}
-  {% assign game_day = game_epoch | plus: utc_offset | date: "%Y-%m-%d" %}
-  {% assign now_epoch = "now" | date: "%s" | plus: 0 %}
-  {% assign today = now_epoch | plus: utc_offset | date: "%Y-%m-%d" %}
-  {% assign tomorrow = now_epoch | plus: utc_offset | plus: 86400 | date: "%Y-%m-%d" %}
-  {% if game_day == today %}
-    {% assign date_label = "Today" %}
-  {% elsif game_day == tomorrow %}
-    {% assign date_label = "Tomorrow" %}
-  {% else %}
-    {% assign m = game_epoch | plus: utc_offset | date: "%m" | plus: 0 %}
-    {% case m %}
-      {% when 1 %}{% assign mn = "Jan." %}
-      {% when 2 %}{% assign mn = "Feb." %}
-      {% when 3 %}{% assign mn = "March" %}
-      {% when 4 %}{% assign mn = "April" %}
-      {% when 5 %}{% assign mn = "May" %}
-      {% when 6 %}{% assign mn = "June" %}
-      {% when 7 %}{% assign mn = "July" %}
-      {% when 8 %}{% assign mn = "Aug." %}
-      {% when 9 %}{% assign mn = "Sept." %}
-      {% when 10 %}{% assign mn = "Oct." %}
-      {% when 11 %}{% assign mn = "Nov." %}
-      {% when 12 %}{% assign mn = "Dec." %}
-    {% endcase %}
-    {% assign day_name = game_epoch | plus: utc_offset | date: "%A" %}
-    {% assign day_num = game_epoch | plus: utc_offset | date: "%-d" %}
-    {% assign date_label = day_name | append: ", " | append: mn | append: " " | append: day_num %}
-  {% endif %}
-  <span class="value">{{ date_label }}</span>
-  {% assign time_str = game_epoch | plus: utc_offset | date: "%l:%M %p" %}
-  <span class="{{ time_class | default: 'value' }}">{{ time_str | replace: "AM", "a.m." | replace: "PM", "p.m." }}</span>
+  <span class="{{ date_class | default: 'value lg:value--large' }}">{{ date_label }}</span>
+  <span class="{{ time_class | default: 'value lg:value--large' }}">{{ time_label }}</span>
 {% endtemplate %}

@@ -50,12 +50,13 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 - Returns TRMNL xhrSelectSearch format: `[{"id": "TEAM_ID|LEAGUE_ID", "name": "Team Name (League)"}]`
 - Minimum 2 characters required
 
-**`GET /next-game?team=TEAM_ID|LEAGUE_ID&type=any|home|away`**
+**`GET /next-game?team=TEAM_ID|LEAGUE_ID&type=any|home|away&locale=LOCALE&tz=IANA_TZ`**
 
 - All filter modes call `/schedule/full/team/{id}` (full current-season schedule across every competition the team is entered in). The list isn't pre-sorted, so the worker filters to upcoming events and sorts ascending before picking the soonest match. Home/away filtering is done locally — see "Cross-league fixtures" below.
 - The `LEAGUE_ID` half of the team param is parsed but no longer used; it's kept for backward compatibility with stored plugin settings.
-- Returns a flat event object (see index.js `formatEvent`) when a game is found
-- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>}`. The team badge is looked up via `/lookup/team/{id}` (cached 30 days per team) so the not-found template can still show the configured team's logo. Invert is computed via the same `shouldInvertBadge` pipeline used for found-state badges.
+- `locale` and `tz` are passed through from `{{ trmnl.user.locale }}` / `{{ trmnl.user.time_zone_iana }}`. The worker uses them to localize `date_label` ("Today", "Heute", "Wednesday, May 1") and `time_label` ("7:00 p.m.", "19:00") on the server, so templates render the strings as-is. Both have a placeholder guard — a literal `{{...}}` string from un-interpolated template syntax falls back to en-US/UTC.
+- Returns a flat event object (see index.js `formatEvent`) when a game is found, including pre-localized `date_label`/`time_label` plus the raw `start_utc_timestamp`.
+- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>, "not_found_message": "..."}`. The team badge is looked up via `/lookup/team/{id}` (cached 30 days per team). `not_found_message` is the localized "No game found" string keyed off the locale's language code (`NOT_FOUND_MESSAGES` table; falls back to English).
 
 ### Redeploy after changes
 
@@ -128,7 +129,8 @@ Caveat: substring matching can produce odd hits (e.g. "xy" matches "Galaxy"). Th
 
 - **Team** (`team_id`): `xhrSelectSearch` — calls Worker `/teams?q=` as user types. Stores composite `"TEAM_ID|LEAGUE_ID"` as the value.
 - **Game Filter** (`game_type`): static select — `any` / `home` / `away`
-- **Polling URL:** `https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}`
+- **Polling URL:** `https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}&locale={{ trmnl.user.locale }}&tz={{ trmnl.user.time_zone_iana }}`
+- **Title bar:** All four layouts include a `title_bar` sibling to `layout` showing the TRMNL render icon and "Next Game" — required by TRMNL plugin guidelines and reviewed-in by David's email feedback (2026-04-26).
 - **Refresh interval:** 15 minutes
 
 ## Local preview `.trmnlp.yml`

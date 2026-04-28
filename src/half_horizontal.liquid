@@ -2,26 +2,30 @@
 <div class="layout">
   {% if team_badge %}
   <div class="flex flex--col gap--xsmall no-shrink">
-    <img class="image-dither" src="{{ team_badge }}" height="128"{% if team_badge_invert %} style="filter: invert(1);"{% endif %}>
+    <img class="image-dither h--32 lg:h--48" src="{{ team_badge }}"{% if team_badge_invert %} style="filter: invert(1);"{% endif %}>
   </div>
   {% endif %}
   <div class="flex flex--col no-shrink">
-    <span class="value">No game found</span>
+    <span class="value lg:value--large">{{ not_found_message }}</span>
   </div>
 </div>
 {% else %}
 <div class="layout">
   <div class="flex flex--col gap--xsmall no-shrink">
-    <img class="image-dither" src="{{ away_team_badge }}" height="128"{% if away_team_badge_invert %} style="filter: invert(1);"{% endif %}>
+    <img class="image-dither h--32 lg:h--48" src="{{ away_team_badge }}"{% if away_team_badge_invert %} style="filter: invert(1);"{% endif %}>
   </div>
   <div class="flex flex--col gap--xsmall">
-    <span class="value value--small">@</span>
+    <span class="value value--small lg:value--xlarge">@</span>
   </div>
   <div class="flex flex--col gap--xsmall no-shrink">
-    <img class="image-dither" src="{{ home_team_badge }}" height="128"{% if home_team_badge_invert %} style="filter: invert(1);"{% endif %}>
+    <img class="image-dither h--32 lg:h--48" src="{{ home_team_badge }}"{% if home_team_badge_invert %} style="filter: invert(1);"{% endif %}>
   </div>
   <div class="flex flex--col no-shrink">
-    {% render "date_time", start_utc_timestamp: start_utc_timestamp, utc_offset: trmnl.user.utc_offset %}
+    {% render "date_time", date_label: date_label, time_label: time_label %}
   </div>
 </div>
 {% endunless %}
+<div class="title_bar">
+  <img class="image" src="https://usetrmnl.com/images/plugins/trmnl--render.svg">
+  <span class="title">Next Game</span>
+</div>

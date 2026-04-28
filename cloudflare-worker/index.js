@@ -67,6 +67,117 @@ const TEAM_BADGE_CACHE_TTL = 30 * 86400; // 30 days
 // renders as dark-on-white on e-ink.
 const WHITE_BADGE_LUMA_THRESHOLD = 200;
 
+// Localized "no game found" copy keyed by language code (the part of an IETF
+// locale tag before the first hyphen). Falls back to English. Templates render
+// the localized string directly via {{ not_found_message }}.
+const NOT_FOUND_MESSAGES = {
+  en: 'No game found',
+  es: 'Sin partido',
+  de: 'Kein Spiel',
+  fr: 'Aucun match',
+  it: 'Nessuna partita',
+  pt: 'Sem jogo',
+  nl: 'Geen wedstrijd',
+  sv: 'Ingen match',
+  da: 'Ingen kamp',
+  no: 'Ingen kamp',
+  fi: 'Ei ottelua',
+  pl: 'Brak meczu',
+  ru: 'Нет матчей',
+  ja: '試合なし',
+  ko: '경기 없음',
+  zh: '无比赛',
+};
+
+// Validate a locale tag, falling back when missing or unparseable. Catches
+// local-preview placeholders like the literal string "{{ trmnl.user.locale }}"
+// that arrive verbatim when trmnlp doesn't interpolate trmnl.* into URLs.
+function parseLocale(raw) {
+  if (!raw || raw.includes('{{')) return 'en-US';
+  try {
+    new Intl.Locale(raw);
+    return raw;
+  } catch {
+    return 'en-US';
+  }
+}
+
+// Validate an IANA time-zone string, falling back to UTC when missing or
+// unparseable. Same {{...}} guard as parseLocale.
+function parseTimeZone(raw) {
+  if (!raw || raw.includes('{{')) return 'UTC';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: raw });
+    return raw;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function notFoundMessage(locale) {
+  const lang = locale.split('-')[0].toLowerCase();
+  return NOT_FOUND_MESSAGES[lang] || NOT_FOUND_MESSAGES.en;
+}
+
+// Capitalize the first character with locale-aware case mapping. Used to make
+// Intl.RelativeTimeFormat output ("today", "heute", "今日") render as a leading
+// capital where the locale supports it; locales with no case (Japanese, etc.)
+// pass through unchanged.
+function capitalizeFirst(s, locale) {
+  if (!s) return s;
+  return s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
+}
+
+// Returns the calendar date in the given IANA time zone, formatted YYYY-MM-DD.
+// Used to compare game day vs. today/tomorrow without DST or offset math.
+function ymdInZone(date, tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function localizeDateLabel(gameMs, locale, tz) {
+  const now = new Date();
+  const todayYmd = ymdInZone(now, tz);
+  const tomorrowYmd = ymdInZone(new Date(now.getTime() + 86400000), tz);
+  const gameYmd = ymdInZone(new Date(gameMs), tz);
+
+  if (gameYmd === todayYmd || gameYmd === tomorrowYmd) {
+    const offset = gameYmd === todayYmd ? 0 : 1;
+    try {
+      const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+      return capitalizeFirst(rtf.format(offset, 'day'), locale);
+    } catch {
+      return offset === 0 ? 'Today' : 'Tomorrow';
+    }
+  }
+
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: tz,
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(gameMs));
+}
+
+function localizeTimeLabel(gameMs, locale, tz) {
+  let timeStr = new Intl.DateTimeFormat(locale, {
+    timeZone: tz,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(gameMs));
+
+  // AP-style lowercase periods for English locales; other locales' native
+  // formats (typically 24h) pass through untouched.
+  if (locale.toLowerCase().startsWith('en')) {
+    timeStr = timeStr.replace(/\bAM\b/g, 'a.m.').replace(/\bPM\b/g, 'p.m.');
+  }
+  return timeStr;
+}
+
 function jsonResponse(data, { status = 200, cors = false, maxAge = 0 } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (cors) headers['Access-Control-Allow-Origin'] = '*';
@@ -81,7 +192,10 @@ function toUtcTimestamp(strTimestamp) {
   return strTimestamp + '+00:00';
 }
 
-function formatEvent(event, { homeInvert, awayInvert }) {
+function formatEvent(event, { homeInvert, awayInvert, locale, tz }) {
+  const utcTimestamp = toUtcTimestamp(event.strTimestamp);
+  const gameMs = utcTimestamp ? Date.parse(utcTimestamp) : NaN;
+  const haveTime = !isNaN(gameMs);
   return {
     found: true,
     home_team: event.strHomeTeam,
@@ -90,7 +204,9 @@ function formatEvent(event, { homeInvert, awayInvert }) {
     away_team_badge: event.strAwayTeamBadge,
     home_team_badge_invert: homeInvert,
     away_team_badge_invert: awayInvert,
-    start_utc_timestamp: toUtcTimestamp(event.strTimestamp),
+    start_utc_timestamp: utcTimestamp,
+    date_label: haveTime ? localizeDateLabel(gameMs, locale, tz) : '',
+    time_label: haveTime ? localizeTimeLabel(gameMs, locale, tz) : '',
     venue: event.strVenue,
     league: event.strLeague,
     sport: event.strSport,
@@ -315,15 +431,17 @@ async function handleTeamsSearch(url, request, env, ctx) {
 async function handleNextGame(url, env, ctx) {
   const teamParam = url.searchParams.get('team') || '';
   const type = url.searchParams.get('type') || 'any';
+  const locale = parseLocale(url.searchParams.get('locale'));
+  const tz = parseTimeZone(url.searchParams.get('tz'));
 
   // The leagueId half is kept for backward compatibility with stored settings
   // but is no longer needed for the lookup.
   const [teamId] = teamParam.split('|');
   if (!teamId) {
-    return jsonResponse({ found: false });
+    return jsonResponse({ found: false, not_found_message: notFoundMessage(locale) });
   }
 
-  const key = buildCacheKey(url.hostname, '/next-game', { team: teamParam, type });
+  const key = buildCacheKey(url.hostname, '/next-game', { team: teamParam, type, locale, tz });
   const cached = await caches.default.match(key);
   if (cached) return cached;
 
@@ -332,7 +450,9 @@ async function handleNextGame(url, env, ctx) {
     { headers: { 'X-API-KEY': env.SPORTSDB_API_KEY } },
   );
   // Don't cache upstream failures — let the next request retry immediately.
-  if (!res.ok) return jsonResponse({ found: false });
+  if (!res.ok) {
+    return jsonResponse({ found: false, not_found_message: notFoundMessage(locale) });
+  }
 
   const data = await res.json();
   // /schedule/full/team is not chronologically ordered — sort ascending so
@@ -355,7 +475,7 @@ async function handleNextGame(url, env, ctx) {
       shouldInvertBadge(event.strHomeTeamBadge, url.hostname, ctx),
       shouldInvertBadge(event.strAwayTeamBadge, url.hostname, ctx),
     ]);
-    payload = formatEvent(event, { homeInvert, awayInvert });
+    payload = formatEvent(event, { homeInvert, awayInvert, locale, tz });
   } else {
     const badge = await fetchTeamBadge(teamId, env, url.hostname, ctx);
     const invert = badge ? await shouldInvertBadge(badge, url.hostname, ctx) : false;
@@ -363,6 +483,7 @@ async function handleNextGame(url, env, ctx) {
       found: false,
       team_badge: badge,
       team_badge_invert: invert,
+      not_found_message: notFoundMessage(locale),
     };
   }
 

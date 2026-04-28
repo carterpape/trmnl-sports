@@ -4,9 +4,9 @@ no_screen_padding: 'no'
 dark_mode: 'no'
 static_data: ''
 polling_verb: get
-framework_version: 2.3.7
+framework_version: 3.0.0
 serverless_language: ''
-polling_url: https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}
+polling_url: https://trmnl-sports.carter-pape.workers.dev/next-game?team={{ team_id }}&type={{ game_type }}&locale={{ trmnl.user.locale }}&tz={{ trmnl.user.time_zone_iana }}
 polling_headers: ''
 polling_body: ''
 id: 271063
