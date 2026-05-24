@@ -10,6 +10,7 @@ cloudflare-worker/node_modules/
 
 # Build artifacts
 src.zip
+_build/
 
 # Claude Code
 .claude/
