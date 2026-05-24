@@ -102,6 +102,8 @@ Every request emits one telemetry record from `emit()` in `index.js`, to two sin
 
 `emit()` is the single writer (built from a per-request collector threaded through the handlers); the top-level `fetch` is wrapped in `try/catch/finally` so every path — including a thrown exception (`outcome: "error"`, a recorded 500) — emits exactly once.
 
+**Separating test from real traffic:** `emit()` classifies every request by User-Agent into a `client` bucket (`trmnl` = TRMNL's Faraday poller, `trmnlp` = local preview, `curl`, `browser`, `other`) and a `source` (`test`/`prod`) via the pure `lib/client.js`. `source = test` when a request carries `?test=1` **or** comes from one of our own dev tools (`trmnlp`/`curl`); everything else (incl. unknown UAs) is `prod`. So for a real-world read, filter `source = prod` (or `client = trmnl` for the tight view); see `observability-queries.md`. **When manually hitting the deployed/dev worker in a way that could look like a real poll (browser, a `wrangler dev --remote` polling-URL override, an odd client), append `&test=1`** so it's tagged test — `trmnlp`/`curl` are auto-tagged, so the marker is the safety net for everything else. The raw `ua` is logged (Workers Logs only, not AE) so buckets can be refined later without redeploying. Rationale + the forensic session that motivated this: `pape-docs/0075`.
+
 Gotchas:
 
 - **AE bindings don't exist in local `wrangler dev`** — `emit()` guards with `env.ANALYTICS?.`, so dev runs fine but writes nothing. Use `wrangler dev --remote` to exercise AE against the real binding.

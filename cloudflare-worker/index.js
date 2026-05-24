@@ -12,6 +12,7 @@ import { classifyNextGameCache, selectNextGame } from "./lib/schedule.js";
 import { formatEvent } from "./lib/format.js";
 import { searchTeams } from "./lib/search.js";
 import { computeBadgeStats, NO_BADGE_TRIM } from "./lib/badge.js";
+import { classifyClient, classifySource } from "./lib/client.js";
 
 const API_BASE = "https://www.thesportsdb.com/api/v2/json";
 
@@ -472,10 +473,14 @@ async function handleNextGame(url, env, ctx, m) {
 //   cache     none | hit | miss | stale | rebuild  (stale = served a durable
 //             entry past its freshness window; rebuild = team-index fan-out ran)
 //   upstream  none | ok | fail | partial
+//   client    trmnl | trmnlp | curl | browser | other  (UA bucket)
+//   source    test | prod  (test = ?test=1, or one of our own dev tools)
 function newMetrics(endpoint, method) {
     return {
         endpoint, // "teams" | "next-game" | "other"
         method,
+        client: "other", // UA bucket; classified in fetch()
+        source: "prod", // test vs prod; classified in fetch()
         outcome: "ok",
         cache: "none",
         upstream: "none",
@@ -510,6 +515,9 @@ function emit(m, env, request) {
             tz: m.tz || null,
             locale: m.locale || null,
             errorName: m.errorName, // omitted by JSON unless outcome === "error"
+            client: m.client,
+            source: m.source,
+            ua: request.headers.get("user-agent"), // raw, for refining buckets
             colo: request.cf?.colo ?? null,
             ray: request.headers.get("cf-ray"),
         }),
@@ -530,6 +538,8 @@ function emit(m, env, request) {
             m.type, // blob7
             m.tz, // blob8
             m.locale, // blob9
+            m.client, // blob10
+            m.source, // blob11
         ],
         doubles: [
             m.latencyMs, // double1
@@ -551,6 +561,14 @@ export default {
               ? "next-game"
               : "other";
         const m = newMetrics(endpoint, request.method);
+        // Classify the caller (real TRMNL poll vs. our test traffic) once, up
+        // front, so every path — including OPTIONS, rate-limit, and error —
+        // carries it. ?test=1 is an explicit override; otherwise it's UA-based.
+        m.client = classifyClient(request.headers.get("user-agent"));
+        m.source = classifySource(
+            m.client,
+            url.searchParams.get("test") === "1",
+        );
 
         let response;
         try {

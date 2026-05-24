@@ -21,12 +21,16 @@ This file is the canonical record of the **AE column contract** plus the canonic
 | `blob7` | type | `any` / `home` / `away` |
 | `blob8` | tz | parsed IANA time zone |
 | `blob9` | locale | parsed locale |
+| `blob10` | client | UA bucket: `trmnl` (TRMNL's Faraday poller) / `trmnlp` (local preview) / `curl` / `browser` / `other` |
+| `blob11` | source | `test` / `prod` — `test` = `?test=1` override or one of our own dev tools (`trmnlp`/`curl`); everything else (incl. unknown UAs) is `prod` |
 | `double1` | latencyMs | wall-clock request duration |
 | `double2` | status | HTTP status code |
 | `double3` | upstreamCalls | primary SportsDB calls issued (0, 1, or ~20 on a teams rebuild) |
 | `double4` | upstreamFails | how many of those calls failed |
 
-Extension point: new dimensions append at `blob10+` / `double5+` (e.g. sub-fetch volume from `fetchTeamMeta`/`shouldInvertBadge`, deliberately not tracked in v1).
+Extension point: new dimensions append at `blob12+` / `double5+` (e.g. sub-fetch volume from `fetchTeamMeta`/`shouldInvertBadge`, deliberately not tracked in v1).
+
+**Filtering out our own test traffic:** the canonical queries below count *all* traffic. For a real-world read, add `AND blob11 = 'prod'` (excludes `?test=1` calls + our `trmnlp`/`curl` traffic) — or, for the tightest "confirmed real installs" view, `AND blob10 = 'trmnl'`. The Workers Logs line carries the raw `ua` alongside `client`/`source`, so the buckets can be refined later without redeploying (e.g. if TRMNL's poller UA ever drifts off Faraday, it shows up as a rising `other` rather than silently misclassifying).
 
 ## Running a query
 
@@ -137,4 +141,19 @@ FROM trmnl_sports_requests
 WHERE timestamp > NOW() - INTERVAL '1' DAY
     AND blob2 IN ('error', 'upstream_fail', 'stale')
 GROUP BY outcome
+```
+
+### Traffic by client + source (last 24h)
+
+Sanity-check the test/real split: confirms our own `trmnlp`/`curl` testing is being tagged `test` and real polls land in `prod` (`client = 'trmnl'`). A `client = 'other'` spike in `prod` is the signal to inspect raw UAs in Workers Logs (TRMNL's poller UA may have drifted off Faraday).
+
+```sql
+SELECT
+    blob10 AS client,
+    blob11 AS source,
+    SUM(_sample_interval) AS n
+FROM trmnl_sports_requests
+WHERE timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY client, source
+ORDER BY n DESC
 ```
