@@ -3,6 +3,10 @@
   <span class="{{ time_class | default: 'value lg:value--large' }}">{{ time_label }}</span>
 {% endtemplate %}
 
+{% template stale_note %}
+  {% if stale %}<span class="{{ stale_class | default: 'value value--xxsmall text--gray-50' }}">{{ as_of_label }}</span>{% endif %}
+{% endtemplate %}
+
 {% template badge %}
   {% assign tx = trim.x | default: 0 %}
   {% assign ty = trim.y | default: 0 %}

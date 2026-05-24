@@ -47,6 +47,11 @@ const LEAGUE_DISPLAY_NAMES = {
 const TEAMS_CACHE_TTL = 86400; // 24h — per-query search response cache
 const TEAM_INDEX_CACHE_TTL = 86400; // 24h — full team list across supported leagues
 const NEXT_GAME_CACHE_TTL = 600; // 10 min — under TRMNL's 15-min poll interval
+// How long the durable /next-game entry survives so it can be served as
+// last-known-good during an upstream outage. The *outgoing* freshness is still
+// NEXT_GAME_CACHE_TTL — the worker reads X-Fetched-At to decide fresh vs. stale,
+// independent of this much-longer storage TTL.
+const LKG_CACHE_TTL = 7 * 86400; // 7 days
 const MAX_SEARCH_RESULTS = 20;
 
 // TheSportsDB keeps recently-finished games in its "next events" response for
@@ -90,6 +95,52 @@ const NOT_FOUND_MESSAGES = {
     zh: "无比赛",
 };
 
+// Localized "can't reach the data source" copy, keyed like NOT_FOUND_MESSAGES.
+// Shown only when upstream is down AND there's no usable last-known-good to fall
+// back on — distinct from the genuine "no game found" so an outage doesn't read
+// as a finished season. Good-faith translations; review with a native speaker.
+const OUTAGE_MESSAGES = {
+    en: "Schedule unavailable",
+    es: "Calendario no disponible",
+    de: "Spielplan nicht verfügbar",
+    fr: "Calendrier indisponible",
+    it: "Calendario non disponibile",
+    pt: "Calendário indisponível",
+    nl: "Schema niet beschikbaar",
+    sv: "Schema ej tillgängligt",
+    da: "Plan utilgængelig",
+    no: "Plan utilgjengelig",
+    fi: "Aikataulu ei käytettävissä",
+    pl: "Harmonogram niedostępny",
+    ru: "Расписание недоступно",
+    ja: "日程を取得できません",
+    ko: "일정을 불러올 수 없음",
+    zh: "无法获取赛程",
+};
+
+// "as of <time>" affixes for the staleness marker, keyed like NOT_FOUND_MESSAGES.
+// `pre`/`post` place the marker around the localized timestamp — most languages
+// prefix it; Japanese/Korean suffix it (e.g. "19:00現在", "오후 7시 기준").
+// Good-faith translations; review with a native speaker.
+const AS_OF_AFFIXES = {
+    en: { pre: "as of " },
+    es: { pre: "a las " },
+    de: { pre: "Stand " },
+    fr: { pre: "à " },
+    it: { pre: "alle " },
+    pt: { pre: "às " },
+    nl: { pre: "vanaf " },
+    sv: { pre: "kl. " },
+    da: { pre: "kl. " },
+    no: { pre: "kl. " },
+    fi: { pre: "klo " },
+    pl: { pre: "stan na " },
+    ru: { pre: "на " },
+    ja: { post: "現在" },
+    ko: { post: " 기준" },
+    zh: { pre: "截至 " },
+};
+
 // Validate a locale tag, falling back when missing or unparseable. Catches
 // local-preview placeholders like the literal string "{{ trmnl.user.locale }}"
 // that arrive verbatim when trmnlp doesn't interpolate trmnl.* into URLs.
@@ -118,6 +169,11 @@ function parseTimeZone(raw) {
 function notFoundMessage(locale) {
     const lang = locale.split("-")[0].toLowerCase();
     return NOT_FOUND_MESSAGES[lang] || NOT_FOUND_MESSAGES.en;
+}
+
+function outageMessage(locale) {
+    const lang = locale.split("-")[0].toLowerCase();
+    return OUTAGE_MESSAGES[lang] || OUTAGE_MESSAGES.en;
 }
 
 // Capitalize the first character with locale-aware case mapping. Used to make
@@ -179,6 +235,26 @@ function localizeTimeLabel(gameMs, locale, tz) {
         timeStr = timeStr.replace(/\bAM\b/g, "a.m.").replace(/\bPM\b/g, "p.m.");
     }
     return timeStr;
+}
+
+// "as of <time>" staleness marker for a last-known-good screen served during an
+// outage. Reuses localizeTimeLabel so the time format matches the live labels.
+// When the cached data was fetched on an earlier calendar day (in the user's
+// zone), prepend a compact date so a multi-day-old fetch doesn't read as today.
+function asOfLabel(fetchedAtMs, locale, tz) {
+    const lang = locale.split("-")[0].toLowerCase();
+    const affix = AS_OF_AFFIXES[lang] || AS_OF_AFFIXES.en;
+    let stamp = localizeTimeLabel(fetchedAtMs, locale, tz);
+    const fetched = new Date(fetchedAtMs);
+    if (ymdInZone(fetched, tz) !== ymdInZone(new Date(), tz)) {
+        const date = new Intl.DateTimeFormat(locale, {
+            timeZone: tz,
+            month: "short",
+            day: "numeric",
+        }).format(fetched);
+        stamp = `${date} ${stamp}`;
+    }
+    return `${affix.pre || ""}${stamp}${affix.post || ""}`;
 }
 
 function jsonResponse(data, { status = 200, cors = false, maxAge = 0 } = {}) {
@@ -361,12 +437,20 @@ async function fetchTeamMeta(teamId, env, hostname, ctx) {
     return meta;
 }
 
+// Is a UTC timestamp string still "upcoming" — at or before UPCOMING_GRACE_MS
+// after kickoff? Shared by the schedule filter (isUpcoming) and the stale
+// last-known-good guard, so both use one definition of "still worth showing".
+// Returns false for a missing/unparseable timestamp.
+function isTimestampUpcoming(utcTimestamp) {
+    if (!utcTimestamp) return false;
+    const startMs = Date.parse(utcTimestamp);
+    if (isNaN(startMs)) return false;
+    return startMs > Date.now() - UPCOMING_GRACE_MS;
+}
+
 function isUpcoming(event) {
     const ts = toUtcTimestamp(event.strTimestamp);
-    if (ts) {
-        const startMs = Date.parse(ts);
-        if (!isNaN(startMs)) return startMs > Date.now() - UPCOMING_GRACE_MS;
-    }
+    if (ts && !isNaN(Date.parse(ts))) return isTimestampUpcoming(ts);
     // Fallback for events without a precise time: compare by date only.
     if (!event.dateEvent) return false;
     return event.dateEvent >= new Date().toISOString().slice(0, 10);
@@ -518,6 +602,45 @@ async function handleTeamsSearch(url, request, env, ctx, m) {
     return response;
 }
 
+// Persist a /next-game payload as the durable last-known-good entry. Stored with
+// a long TTL so it survives well past the 10-min freshness window, plus an
+// X-Fetched-At stamp the handler reads to compute fresh-vs-stale itself. Kept
+// separate from the short-TTL response returned to the client.
+function writeDurable(key, payload, ctx) {
+    const resp = new Response(JSON.stringify(payload), {
+        headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": `public, max-age=${LKG_CACHE_TTL}`,
+            "X-Fetched-At": String(Date.now()),
+        },
+    });
+    ctx.waitUntil(caches.default.put(key, resp.clone()));
+}
+
+// Recover the configured team's badge/name/league for an outage screen when we
+// have no last-known-good payload to reuse. Leans on the 30-day team-meta and
+// badge-analysis caches, so a previously-seen team stays branded even while
+// upstream is down; a never-seen team degrades to just the message. Mirrors the
+// not-found payload's team fields so the templates render identically.
+async function outageTeamMeta(teamId, leagueIdFromUrl, env, hostname, ctx) {
+    const meta = await fetchTeamMeta(teamId, env, hostname, ctx);
+    const teamLeagueLabel =
+        LEAGUE_DISPLAY_NAMES[leagueIdFromUrl] ||
+        LEAGUE_DISPLAY_NAMES[meta.idLeague] ||
+        meta.strLeague ||
+        "";
+    const { invert, trim } = meta.badge
+        ? await analyzeBadge(meta.badge, hostname, ctx)
+        : { invert: false, trim: NO_BADGE_TRIM };
+    return {
+        team_badge: meta.badge,
+        team_badge_invert: invert,
+        team_badge_trim: trim,
+        team_name: meta.name || "",
+        team_league_label: teamLeagueLabel,
+    };
+}
+
 // GET /next-game?team=TEAM_ID|LEAGUE_ID&type=any|home|away
 // Returns the next matching game for the given team, or { found: false }.
 //
@@ -561,11 +684,31 @@ async function handleNextGame(url, env, ctx, m) {
         locale,
         tz,
     });
+    // One durable cache entry per (team,type,locale,tz): stored with a long TTL
+    // plus an X-Fetched-At stamp, but the worker computes its own freshness.
+    // Fresh (< NEXT_GAME_CACHE_TTL old) → serve as a hit. Stale → keep it in hand
+    // as last-known-good and try to refresh; if upstream then fails we serve the
+    // stale copy rather than a misleading empty "no game" screen.
     const cached = await caches.default.match(key);
-    // Stamp BEFORE returning the cached Response — it carries no metadata.
+    let lkg = null;
+    let fetchedAt = 0;
     if (cached) {
-        m.cache = "hit";
-        return cached;
+        fetchedAt = Number(cached.headers.get("X-Fetched-At")) || 0;
+        try {
+            lkg = await cached.json();
+        } catch {
+            lkg = null; // Unexpected cache shape — treat as a miss, refetch.
+        }
+        if (
+            lkg &&
+            fetchedAt &&
+            Date.now() - fetchedAt < NEXT_GAME_CACHE_TTL * 1000
+        ) {
+            m.cache = "hit";
+            // Re-wrap so TRMNL sees the short poll-cadence TTL, not the long
+            // durable TTL the stored entry carries.
+            return jsonResponse(lkg, { maxAge: NEXT_GAME_CACHE_TTL });
+        }
     }
     m.cache = "miss";
 
@@ -574,14 +717,52 @@ async function handleNextGame(url, env, ctx, m) {
     });
     m.upstreamCalls = 1;
     m.upstream = res.ok ? "ok" : "fail";
-    // Don't cache upstream failures — let the next request retry immediately.
     if (!res.ok) {
         m.upstreamFails = 1;
+        // Upstream is down. Serve last-known-good if we have something worth
+        // showing, so a blip doesn't masquerade as a finished season.
+        if (lkg) {
+            // THE GUARD: never re-serve a game whose start time has already
+            // passed — a 7-day durable entry routinely outlives the game it
+            // describes, and a confidently-wrong "next game" is worse than an
+            // honest outage message. A season-over (found:false) entry has no
+            // game to expire, so it's always still valid to re-show.
+            const serveStale =
+                lkg.found === false ||
+                isTimestampUpcoming(lkg.start_utc_timestamp);
+            if (serveStale) {
+                m.cache = "stale";
+                m.outcome = "stale";
+                return jsonResponse(
+                    {
+                        ...lkg,
+                        stale: true,
+                        as_of_label: asOfLabel(fetchedAt, locale, tz),
+                    },
+                    { maxAge: 0 },
+                );
+            }
+        }
+        // Nothing usable to fall back on — say so honestly, but recover the
+        // team's badge/name (from the 30-day team-meta cache) so the screen
+        // stays branded. maxAge 0 so the next poll re-attempts upstream promptly.
         m.outcome = "upstream_fail";
-        return jsonResponse({
-            found: false,
-            not_found_message: notFoundMessage(locale),
-        });
+        const meta = await outageTeamMeta(
+            teamId,
+            leagueIdFromUrl,
+            env,
+            url.hostname,
+            ctx,
+        );
+        return jsonResponse(
+            {
+                found: false,
+                outage: true,
+                ...meta,
+                not_found_message: outageMessage(locale),
+            },
+            { maxAge: 0 },
+        );
     }
 
     const data = await res.json();
@@ -647,9 +828,10 @@ async function handleNextGame(url, env, ctx, m) {
         };
     }
 
-    const response = jsonResponse(payload, { maxAge: NEXT_GAME_CACHE_TTL });
-    ctx.waitUntil(caches.default.put(key, response.clone()));
-    return response;
+    // Persist as the durable last-known-good entry (long TTL + X-Fetched-At),
+    // but return a short-TTL response so TRMNL re-polls on its normal cadence.
+    writeDurable(key, payload, ctx);
+    return jsonResponse(payload, { maxAge: NEXT_GAME_CACHE_TTL });
 }
 
 // ── Observability ─────────────────────────────────────────────────────────
@@ -659,9 +841,11 @@ async function handleNextGame(url, env, ctx, m) {
 // column order below is a permanent contract — never reorder, append only.
 // See cloudflare-worker/observability-queries.md for the schema and queries.
 //
-//   outcome   ok | short_query | missing_team | upstream_fail | rate_limited
-//             | cors_preflight | method_not_allowed | not_found | error
-//   cache     none | hit | miss | rebuild  (rebuild = team-index fan-out ran)
+//   outcome   ok | stale | short_query | missing_team | upstream_fail
+//             | rate_limited | cors_preflight | method_not_allowed | not_found
+//             | error  (stale = served last-known-good because upstream failed)
+//   cache     none | hit | miss | stale | rebuild  (stale = served a durable
+//             entry past its freshness window; rebuild = team-index fan-out ran)
 //   upstream  none | ok | fail | partial
 function newMetrics(endpoint, method) {
     return {

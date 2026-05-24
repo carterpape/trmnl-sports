@@ -7,6 +7,7 @@
   {% endif %}
   <div class="flex flex--col no-shrink">
     <span class="value value--small lg:value--base">{{ not_found_message }}</span>
+    {% render "stale_note", stale: stale, as_of_label: as_of_label, stale_class: "value value--xxsmall" %}
   </div>
 </div>
 {% else %}
@@ -18,6 +19,7 @@
   </div>
   <div class="flex flex--col">
     {% render "date_time", date_label: date_label, time_label: time_label, date_class: "value value--small lg:value--base", time_class: "value value--small lg:value--base" %}
+    {% render "stale_note", stale: stale, as_of_label: as_of_label, stale_class: "value value--xxsmall" %}
   </div>
 </div>
 {% endunless %}

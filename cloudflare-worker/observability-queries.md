@@ -13,8 +13,8 @@ This file is the canonical record of the **AE column contract** plus the canonic
 | --- | --- | --- |
 | `index1` | endpoint | sampling key: `teams` / `next-game` / `other` |
 | `blob1` | endpoint | same value as `index1` (kept as a blob for uniform `GROUP BY`) |
-| `blob2` | outcome | `ok` / `short_query` / `missing_team` / `upstream_fail` / `rate_limited` / `cors_preflight` / `method_not_allowed` / `not_found` / `error` |
-| `blob3` | cache | `none` / `hit` / `miss` / `rebuild` (`rebuild` = this request paid the ~20-call team-index fan-out) |
+| `blob2` | outcome | `ok` / `stale` / `short_query` / `missing_team` / `upstream_fail` / `rate_limited` / `cors_preflight` / `method_not_allowed` / `not_found` / `error` (`stale` = served last-known-good because upstream failed) |
+| `blob3` | cache | `none` / `hit` / `miss` / `stale` / `rebuild` (`stale` = served a durable entry past its freshness window; `rebuild` = this request paid the ~20-call team-index fan-out) |
 | `blob4` | upstream | `none` / `ok` / `fail` / `partial` |
 | `blob5` | method | `GET` / `POST` / `OPTIONS` |
 | `blob6` | team | configured team ID, `next-game` only (public ID, not PII) |
@@ -44,7 +44,7 @@ Always weight counts by `_sample_interval` (it is `1` until AE down-samples at h
 
 ### Cache-hit ratio, per endpoint (last 24h)
 
-The headline number for roadmap item B. `next-game`'s ratio shows how often a poll re-fetches SportsDB.
+The headline number for roadmap item B. `next-game`'s ratio shows how often a poll re-fetches SportsDB. `stale` serves are deliberately excluded from both the numerator and the denominator — they're an outage signal, not a cache outcome; watch them via the degradation query below.
 
 ```sql
 SELECT
@@ -127,7 +127,7 @@ ORDER BY day
 
 ### Error / degradation watch (last 24h)
 
-Watches the upstream-failure path and the new caught-exception path (`outcome = error`, a deliberate recorded 500 added with this instrumentation).
+Watches the degradation paths: `stale` (served last-known-good because upstream was down — the screen survived the outage), `upstream_fail` (upstream was down with nothing usable to serve — the device showed "Schedule unavailable"), and `error` (a caught exception, a deliberate recorded 500). A rising `stale` count means outages are happening but being absorbed; a rising `upstream_fail` means outages are reaching the screen.
 
 ```sql
 SELECT
@@ -135,6 +135,6 @@ SELECT
     SUM(_sample_interval) AS n
 FROM trmnl_sports_requests
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-    AND blob2 IN ('error', 'upstream_fail')
+    AND blob2 IN ('error', 'upstream_fail', 'stale')
 GROUP BY outcome
 ```

@@ -11,6 +11,7 @@
     <div class="row row--center">
       <div class="flex flex--col no-shrink">
         <span class="value lg:value--large">{{ not_found_message }}</span>
+        {% render "stale_note", stale: stale, as_of_label: as_of_label %}
       </div>
     </div>
   </div>
@@ -32,6 +33,7 @@
     <div class="row row--center">
       <div class="flex flex--col no-shrink">
         {% render "date_time", date_label: date_label, time_label: time_label %}
+        {% render "stale_note", stale: stale, as_of_label: as_of_label %}
       </div>
     </div>
   </div>
