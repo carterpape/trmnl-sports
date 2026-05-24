@@ -12,7 +12,8 @@
   {% assign ty = trim.y | default: 0 %}
   {% assign tw = trim.w | default: 1 %}
   {% assign th = trim.h | default: 1 %}
-  <div class="badge-clip {{ size_class }}" style="aspect-ratio: {{ tw }} / {{ th }}; overflow: hidden;">
+  {% comment %} height contains to any width cap (w--max-*) so a clamped wide logo shrinks in BOTH axes and keeps filling the clip — preserving the 0077 edge-to-edge fit. Inert without a cap: --tn-size-w-max falls back huge, so min() picks the full h-- height. See pape-docs/0078. {% endcomment %}
+  <div class="badge-clip {{ size_class }}" style="aspect-ratio: {{ tw }} / {{ th }}; overflow: hidden; height: min(var(--tn-size-h), calc(var(--tn-size-w-max, 100000px) * {{ th }} / {{ tw }}));">
     <img class="image-dither" src="{{ src }}" style="width: calc(100% / {{ tw }}); height: auto; max-width: none; max-height: none; display: block; transform: translate(calc({{ tx }} * -100%), calc({{ ty }} * -100%));{% if invert %} filter: invert(1);{% endif %}">
   </div>
 {% endtemplate %}
