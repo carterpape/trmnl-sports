@@ -72,6 +72,20 @@ Stream live logs:
 npx wrangler tail
 ```
 
+### Observability
+
+Every request emits one telemetry record from `emit()` in `index.js`, to two sinks (both free-tier, configured in `wrangler.toml`):
+
+- **Workers Logs** (`[observability] enabled = true`) — a structured `console.log` line tagged `"evt":"req"` with `endpoint`/`outcome`/`cache`/`upstream`/`latencyMs`/config dims. For per-request debugging. 7-day retention.
+- **Analytics Engine** (`[[analytics_engine_datasets]]`, binding `ANALYTICS`, dataset `trmnl_sports_requests`) — one `writeDataPoint` per request for aggregate trends (cache-hit ratio, upstream error rate, volume, latency, distinct-config install proxy). 3-month retention. The **column order is a permanent positional contract** — see `cloudflare-worker/observability-queries.md` for the schema and canonical SQL.
+
+`emit()` is the single writer (built from a per-request collector threaded through the handlers); the top-level `fetch` is wrapped in `try/catch/finally` so every path — including a thrown exception (`outcome: "error"`, a recorded 500) — emits exactly once.
+
+Gotchas:
+
+- **AE bindings don't exist in local `wrangler dev`** — `emit()` guards with `env.ANALYTICS?.`, so dev runs fine but writes nothing. Use `wrangler dev --remote` to exercise AE against the real binding.
+- **Backgrounded / non-TTY `wrangler dev` does not surface worker `console.log`** (it streams worker logs over the DevTools inspector channel, only rendered interactively; the `[wrangler:info] METHOD PATH STATUS` request lines are a separate always-on logger). Don't conclude logging is broken from a piped dev session — verify logs via `wrangler tail`, the dashboard Query Builder, or the `cloudflare-observability` MCP (`query_worker_observability`) against the deployed worker. (Running dev under a real TTY via `script` instead triggers wrangler's interactive "install skills?" prompt and blocks.)
+
 ## TheSportsDB API
 
 - **Version:** v2 (`https://www.thesportsdb.com/api/v2/json`)

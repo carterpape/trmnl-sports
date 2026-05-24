@@ -342,10 +342,14 @@ function buildCacheKey(workerHostname, path, params) {
 //
 // Side benefit: per-keystroke fan-out to SportsDB disappears. After warmup,
 // each Cloudflare POP only refreshes the index ~21 times per 24h.
-async function getTeamIndex(env, hostname, ctx) {
+async function getTeamIndex(env, hostname, ctx, m) {
     const key = buildCacheKey(hostname, "/_team-index", {});
     const cached = await caches.default.match(key);
+    // Index warm — m.cache stays "miss" (cheap recompute, no fan-out).
     if (cached) return await cached.json();
+
+    // This request pays the full ~20-call SportsDB fan-out to rebuild the index.
+    m.cache = "rebuild";
 
     const leagueIds = [...SUPPORTED_LEAGUE_IDS];
     const results = await Promise.allSettled(
@@ -358,9 +362,14 @@ async function getTeamIndex(env, hostname, ctx) {
 
     const index = [];
     let anySucceeded = false;
+    let failures = 0;
     results.forEach((result, i) => {
         const id = leagueIds[i];
-        if (result.status !== "fulfilled" || !result.value) return;
+        // A call failed if it threw or returned non-OK (mapped to null above).
+        if (result.status !== "fulfilled" || !result.value) {
+            failures++;
+            return;
+        }
         const teams = result.value.list || result.value.teams || [];
         if (teams.length === 0) return;
         anySucceeded = true;
@@ -380,6 +389,12 @@ async function getTeamIndex(env, hostname, ctx) {
             });
         }
     });
+
+    m.upstreamCalls = leagueIds.length;
+    m.upstreamFails = failures;
+    if (failures === 0) m.upstream = "ok";
+    else if (failures < leagueIds.length) m.upstream = "partial";
+    else m.upstream = "fail";
 
     // If every league failed, don't poison the cache with an empty index.
     if (!anySucceeded) return [];
@@ -410,7 +425,7 @@ function matchRank(team, q) {
 // Returns teams matching the query, filtered to supported leagues,
 // in TRMNL xhrSelectSearch format. Matches against team name, alternate name,
 // and keywords via the cached team index — no upstream call per request.
-async function handleTeamsSearch(url, request, env, ctx) {
+async function handleTeamsSearch(url, request, env, ctx, m) {
     let qRaw = (url.searchParams.get("q") || "").trim();
     if (!qRaw && request.method === "POST") {
         try {
@@ -419,15 +434,21 @@ async function handleTeamsSearch(url, request, env, ctx) {
         } catch {}
     }
     if (qRaw.length < 2) {
+        m.outcome = "short_query";
         return jsonResponse([], { cors: true });
     }
     const q = qRaw.toLowerCase();
 
     const key = buildCacheKey(url.hostname, "/teams", { q });
     const cached = await caches.default.match(key);
-    if (cached) return cached;
+    // Stamp BEFORE returning the cached Response — it carries no metadata.
+    if (cached) {
+        m.cache = "hit";
+        return cached;
+    }
+    m.cache = "miss";
 
-    const index = await getTeamIndex(env, url.hostname, ctx);
+    const index = await getTeamIndex(env, url.hostname, ctx, m);
     const matches = index
         .filter((t) => t.searchBlob.includes(q))
         .map((t) => ({ team: t, rank: matchRank(t, q) }))
@@ -458,7 +479,7 @@ async function handleTeamsSearch(url, request, env, ctx) {
 // filtering is done locally so cross-league matches stay visible regardless
 // of filter, and we can find the next home/away match anywhere in the
 // season rather than just within the next handful of events.
-async function handleNextGame(url, env, ctx) {
+async function handleNextGame(url, env, ctx, m) {
     const teamParam = url.searchParams.get("team") || "";
     const type = url.searchParams.get("type") || "any";
     const locale = parseLocale(url.searchParams.get("locale"));
@@ -469,7 +490,17 @@ async function handleNextGame(url, env, ctx) {
     // the league of the next match — cup fixtures shouldn't change the label).
     const [teamId, leagueIdRaw] = teamParam.split("|");
     const leagueIdFromUrl = leagueIdRaw ? Number(leagueIdRaw) : null;
+
+    // Stamp config dimensions from parsed/validated values (so {{...}}
+    // placeholders and junk don't inflate cardinality). team/league IDs are
+    // public, not PII.
+    m.team = teamId || "";
+    m.type = type;
+    m.tz = tz;
+    m.locale = locale;
+
     if (!teamId) {
+        m.outcome = "missing_team";
         return jsonResponse({
             found: false,
             not_found_message: notFoundMessage(locale),
@@ -483,13 +514,22 @@ async function handleNextGame(url, env, ctx) {
         tz,
     });
     const cached = await caches.default.match(key);
-    if (cached) return cached;
+    // Stamp BEFORE returning the cached Response — it carries no metadata.
+    if (cached) {
+        m.cache = "hit";
+        return cached;
+    }
+    m.cache = "miss";
 
     const res = await fetch(`${API_BASE}/schedule/full/team/${teamId}`, {
         headers: { "X-API-KEY": env.SPORTSDB_API_KEY },
     });
+    m.upstreamCalls = 1;
+    m.upstream = res.ok ? "ok" : "fail";
     // Don't cache upstream failures — let the next request retry immediately.
     if (!res.ok) {
+        m.upstreamFails = 1;
+        m.outcome = "upstream_fail";
         return jsonResponse({
             found: false,
             not_found_message: notFoundMessage(locale),
@@ -561,41 +601,158 @@ async function handleNextGame(url, env, ctx) {
     return response;
 }
 
+// ── Observability ─────────────────────────────────────────────────────────
+// One structured log line + one Analytics Engine datapoint per request, both
+// built from a single request-scoped collector. The collector is write-only:
+// handlers stamp facts as they learn them; only emit() reads it back. The AE
+// column order below is a permanent contract — never reorder, append only.
+// See cloudflare-worker/observability-queries.md for the schema and queries.
+//
+//   outcome   ok | short_query | missing_team | upstream_fail | rate_limited
+//             | cors_preflight | method_not_allowed | not_found | error
+//   cache     none | hit | miss | rebuild  (rebuild = team-index fan-out ran)
+//   upstream  none | ok | fail | partial
+function newMetrics(endpoint, method) {
+    return {
+        endpoint, // "teams" | "next-game" | "other"
+        method,
+        outcome: "ok",
+        cache: "none",
+        upstream: "none",
+        upstreamCalls: 0,
+        upstreamFails: 0,
+        status: 0, // filled from the Response at emit time
+        latencyMs: 0,
+        // next-game config dimensions (stay "" for other endpoints)
+        team: "",
+        type: "",
+        tz: "",
+        locale: "",
+    };
+}
+
+function emit(m, env, request) {
+    // Workers Logs sink: one structured line, searchable in the dashboard.
+    console.log(
+        JSON.stringify({
+            evt: "req",
+            endpoint: m.endpoint,
+            method: m.method,
+            outcome: m.outcome,
+            cache: m.cache,
+            upstream: m.upstream,
+            upstreamCalls: m.upstreamCalls,
+            upstreamFails: m.upstreamFails,
+            status: m.status,
+            latencyMs: m.latencyMs,
+            team: m.team || null,
+            type: m.type || null,
+            tz: m.tz || null,
+            locale: m.locale || null,
+            errorName: m.errorName, // omitted by JSON unless outcome === "error"
+            colo: request.cf?.colo ?? null,
+            ray: request.headers.get("cf-ray"),
+        }),
+    );
+
+    // Analytics Engine sink: one datapoint, queryable over time. Writes are
+    // non-blocking (no await / waitUntil). The binding is absent in local
+    // `wrangler dev`, so `?.` makes this a no-op there.
+    env.ANALYTICS?.writeDataPoint({
+        indexes: [m.endpoint], // sampling key (≤ 96 bytes)
+        blobs: [
+            m.endpoint, // blob1
+            m.outcome, // blob2
+            m.cache, // blob3
+            m.upstream, // blob4
+            m.method, // blob5
+            m.team, // blob6
+            m.type, // blob7
+            m.tz, // blob8
+            m.locale, // blob9
+        ],
+        doubles: [
+            m.latencyMs, // double1
+            m.status, // double2
+            m.upstreamCalls, // double3
+            m.upstreamFails, // double4
+        ],
+    });
+}
+
 export default {
     async fetch(request, env, ctx) {
+        const startedAt = Date.now();
         const url = new URL(request.url);
         const isTeamsSearch = url.pathname === "/teams";
+        const endpoint = isTeamsSearch
+            ? "teams"
+            : url.pathname === "/next-game"
+              ? "next-game"
+              : "other";
+        const m = newMetrics(endpoint, request.method);
 
-        if (request.method === "OPTIONS") {
-            // Only /teams is browser-fetched (xhrSelectSearch); /next-game is
-            // server-polled by TRMNL, so it never preflights.
-            if (isTeamsSearch) {
-                return new Response(null, {
-                    headers: {
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type",
-                    },
-                });
+        let response;
+        try {
+            if (request.method === "OPTIONS") {
+                // Only /teams is browser-fetched (xhrSelectSearch); /next-game
+                // is server-polled by TRMNL, so it never preflights.
+                if (isTeamsSearch) {
+                    m.outcome = "cors_preflight";
+                    response = new Response(null, {
+                        headers: {
+                            "Access-Control-Allow-Origin": "*",
+                            "Access-Control-Allow-Methods":
+                                "GET, POST, OPTIONS",
+                            "Access-Control-Allow-Headers": "Content-Type",
+                        },
+                    });
+                } else {
+                    m.outcome = "method_not_allowed";
+                    response = new Response(null, { status: 405 });
+                }
+                return response;
             }
-            return new Response(null, { status: 405 });
-        }
 
-        const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-        const { success } = await env.RATE_LIMITER.limit({ key: ip });
-        if (!success) {
-            return jsonResponse(
-                { error: "Too many requests" },
-                {
-                    status: 429,
-                    cors: isTeamsSearch,
-                },
+            const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+            const { success } = await env.RATE_LIMITER.limit({ key: ip });
+            if (!success) {
+                m.outcome = "rate_limited";
+                response = jsonResponse(
+                    { error: "Too many requests" },
+                    { status: 429, cors: isTeamsSearch },
+                );
+                return response;
+            }
+
+            if (isTeamsSearch) {
+                response = await handleTeamsSearch(url, request, env, ctx, m);
+                return response;
+            }
+            if (url.pathname === "/next-game") {
+                response = await handleNextGame(url, env, ctx, m);
+                return response;
+            }
+
+            m.outcome = "not_found";
+            response = new Response("Not found", { status: 404 });
+            return response;
+        } catch (err) {
+            m.outcome = "error";
+            m.errorName = err?.name ?? "Error";
+            response = jsonResponse(
+                { error: "Internal error" },
+                { status: 500, cors: isTeamsSearch },
             );
+            return response;
+        } finally {
+            m.status = response?.status ?? 0;
+            m.latencyMs = Date.now() - startedAt;
+            try {
+                emit(m, env, request);
+            } catch {
+                // Telemetry must never mask the real response.
+            }
         }
-
-        if (isTeamsSearch) return handleTeamsSearch(url, request, env, ctx);
-        if (url.pathname === "/next-game") return handleNextGame(url, env, ctx);
-
-        return new Response("Not found", { status: 404 });
     },
 };

@@ -10,3 +10,14 @@ name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
 simple = {limit = 50, period = 60}
+
+# Workers Logs: persist structured console.log output (7-day retention, GA).
+[observability]
+enabled = true
+
+# Analytics Engine: one queryable datapoint per request (see index.js emit()).
+# Dataset is the SQL table name (pinned); auto-created on first write. Binding
+# is absent in local `wrangler dev` — emit() guards with `env.ANALYTICS?.`.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "trmnl_sports_requests"
