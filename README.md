@@ -22,45 +22,45 @@ A [TRMNL](https://usetrmnl.com) plugin that shows your favorite team's next sche
 
 ## Supported leagues
 
-**North America**
+### North America
 
-| League                              | Sport               |
-| ----------------------------------- | ------------------- |
-| NHL                                 | Hockey              |
-| NBA                                 | Basketball          |
-| MLB                                 | Baseball            |
-| NFL                                 | American football   |
-| MLS                                 | Soccer              |
-| WNBA                                | Basketball          |
-| NWSL                                | Soccer              |
-| NCAA Division I Men's Basketball    | Basketball          |
-| NCAA Division I Women's Basketball  | Basketball          |
-| NCAA Division I Football            | American football   |
-| CFL                                 | Canadian football   |
+| League | Sport |
+| --- | --- |
+| NHL | Hockey |
+| NBA | Basketball |
+| MLB | Baseball |
+| NFL | American football |
+| MLS | Soccer |
+| WNBA | Basketball |
+| NWSL | Soccer |
+| NCAA Division I Men's Basketball | Basketball |
+| NCAA Division I Women's Basketball | Basketball |
+| NCAA Division I Football | American football |
+| CFL | Canadian football |
 
-**Europe (soccer)**
+### Europe (soccer)
 
-| League                | Country  |
-| --------------------- | -------- |
-| Premier League        | England  |
-| La Liga               | Spain    |
-| Bundesliga            | Germany  |
-| Serie A               | Italy    |
-| Ligue 1               | France   |
+| League | Country |
+| --- | --- |
+| Premier League | England |
+| La Liga | Spain |
+| Bundesliga | Germany |
+| Serie A | Italy |
+| Ligue 1 | France |
 
-**Australia**
+### Australia
 
-| League | Sport                    |
-| ------ | ------------------------ |
-| AFL    | Australian rules football |
-| NRL    | Rugby league              |
+| League | Sport |
+| --- | --- |
+| AFL | Australian rules football |
+| NRL | Rugby league |
 
-**Cricket**
+### Cricket
 
-| League                             | Country        |
-| ---------------------------------- | -------------- |
-| Indian Premier League (IPL)        | India          |
-| Big Bash League (BBL)              | Australia      |
+| League | Country |
+| --- | --- |
+| Indian Premier League (IPL) | India |
+| Big Bash League (BBL) | Australia |
 
 If your league isn't here, please [open an issue](https://github.com/CarterPape/trmnl-sports/issues) — adding leagues is usually a small change as long as TheSportsDB covers them.
 
@@ -103,8 +103,8 @@ The repo is `trmnlp`-compatible. See the [parent repo's README](../) for the loc
 
 ```yaml
 custom_fields:
-  team_id: "TEAM_ID|LEAGUE_ID"   # find via: curl "https://trmnl-sports.carter-pape.workers.dev/teams?q=Chicago"
-  game_type: "any"               # any | home | away
+    team_id: "TEAM_ID|LEAGUE_ID"   # find via: curl "https://trmnl-sports.carter-pape.workers.dev/teams?q=Chicago"
+    game_type: "any"               # any | home | away
 ```
 
 …then run `trmnlp serve` from the project root.

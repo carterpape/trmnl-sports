@@ -23,7 +23,7 @@ cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.d
 
 ## Publication
 
-- **GitHub:** https://github.com/CarterPape/trmnl-sports (public)
+- **GitHub:** <https://github.com/CarterPape/trmnl-sports> (public)
 - **TRMNL plugin ID:** 271063 (name: "Next Game")
 
 ## Cloudflare Worker
@@ -86,28 +86,28 @@ npx wrangler tail
 
 Defined in `cloudflare-worker/index.js` as `SUPPORTED_LEAGUE_IDS`.
 
-| League                              | ID   |
-| ----------------------------------- | ---- |
-| NHL                                 | 4380 |
-| NBA                                 | 4387 |
-| MLB                                 | 4424 |
-| WNBA                                | 4516 |
-| NWSL                                | 4521 |
-| NCAA Men's Basketball               | 4607 |
-| NCAA Women's Basketball             | 5789 |
-| NFL                                 | 4391 |
-| NCAA Division I Football            | 4479 |
-| MLS                                 | 4346 |
-| CFL                                 | 4405 |
-| English Premier League              | 4328 |
-| Spanish La Liga                     | 4335 |
-| German Bundesliga                   | 4331 |
-| Italian Serie A                     | 4332 |
-| French Ligue 1                      | 4334 |
-| AFL                                 | 4456 |
-| NRL                                 | 4416 |
-| Indian Premier League               | 4460 |
-| Australian Big Bash League          | 4461 |
+| League | ID |
+| --- | --- |
+| NHL | 4380 |
+| NBA | 4387 |
+| MLB | 4424 |
+| WNBA | 4516 |
+| NWSL | 4521 |
+| NCAA Men's Basketball | 4607 |
+| NCAA Women's Basketball | 5789 |
+| NFL | 4391 |
+| NCAA Division I Football | 4479 |
+| MLS | 4346 |
+| CFL | 4405 |
+| English Premier League | 4328 |
+| Spanish La Liga | 4335 |
+| German Bundesliga | 4331 |
+| Italian Serie A | 4332 |
+| French Ligue 1 | 4334 |
+| AFL | 4456 |
+| NRL | 4416 |
+| Indian Premier League | 4460 |
+| Australian Big Bash League | 4461 |
 
 ### Dropdown label overrides (`LEAGUE_DISPLAY_NAMES`)
 
