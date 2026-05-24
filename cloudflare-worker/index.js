@@ -218,7 +218,10 @@ async function handleTeamsSearch(url, request, env, ctx, m) {
         try {
             const body = await request.json();
             qRaw = (body.query || body.q || "").trim();
-        } catch {}
+        } catch {
+            // Malformed/absent JSON body → leave qRaw empty, which falls
+            // through to the < 2 chars short_query path below.
+        }
     }
     if (qRaw.length < 2) {
         m.outcome = "short_query";
@@ -406,7 +409,7 @@ async function handleNextGame(url, env, ctx, m) {
     }
 
     const data = await res.json();
-    const event = selectNextGame(data.schedule, type, teamId);
+    const event = selectNextGame(data.schedule, type, teamId, tz);
 
     // Resolve the team's home-league display label. Prefer the URL's leagueId
     // (which TRMNL stores when the user picks the team from the dropdown). Fall

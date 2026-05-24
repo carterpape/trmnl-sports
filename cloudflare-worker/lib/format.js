@@ -40,9 +40,14 @@ export function formatEvent(
             ? localizeDateLabel(gameMs, locale, tz, nowMs)
             : "",
         time_label: haveTime ? localizeTimeLabel(gameMs, locale, tz) : "",
+        // Reserved for future templates; not rendered today.
+        //   venue  — for a possible "@ <stadium>" line.
+        //   league — the raw next-event league (e.g. "FA Cup" for a cup tie),
+        //            deliberately distinct from the displayed team_league_label
+        //            (which stays the team's home league). If ever shown, qualify
+        //            it visually so a cross-competition fixture reads as such.
         venue: event.strVenue,
         league: event.strLeague,
-        sport: event.strSport,
         team_name: teamName || "",
         team_league_label: teamLeagueLabel || event.strLeague || "",
     };

@@ -65,21 +65,33 @@ describe("isUpcoming", () => {
     const yesterday = new Date(NOW - 24 * HOUR).toISOString().slice(0, 10);
 
     it("uses the precise timestamp when present", () => {
-        expect(isUpcoming({ strTimestamp: "2026-05-30 19:00:00" }, NOW)).toBe(
-            true,
-        );
-        expect(isUpcoming({ strTimestamp: "2026-05-01 19:00:00" }, NOW)).toBe(
-            false,
-        );
+        expect(
+            isUpcoming({ strTimestamp: "2026-05-30 19:00:00" }, "UTC", NOW),
+        ).toBe(true);
+        expect(
+            isUpcoming({ strTimestamp: "2026-05-01 19:00:00" }, "UTC", NOW),
+        ).toBe(false);
     });
 
     it("falls back to date-only comparison without a timestamp", () => {
-        expect(isUpcoming({ dateEvent: today }, NOW)).toBe(true);
-        expect(isUpcoming({ dateEvent: yesterday }, NOW)).toBe(false);
+        expect(isUpcoming({ dateEvent: today }, "UTC", NOW)).toBe(true);
+        expect(isUpcoming({ dateEvent: yesterday }, "UTC", NOW)).toBe(false);
     });
 
     it("is false when neither timestamp nor date is present", () => {
-        expect(isUpcoming({}, NOW)).toBe(false);
+        expect(isUpcoming({}, "UTC", NOW)).toBe(false);
+    });
+
+    it("uses the user's time zone for the date-only fallback", () => {
+        // 2026-05-25 06:00 UTC is still 2026-05-24 23:00 in Los Angeles (PDT),
+        // so a timestamp-less game dated 2026-05-24 is "today" locally but
+        // already "yesterday" in UTC — the tz-naive fallback wrongly drops it.
+        const lateNightUtc = Date.parse("2026-05-25T06:00:00Z");
+        const event = { dateEvent: "2026-05-24" };
+        expect(isUpcoming(event, "America/Los_Angeles", lateNightUtc)).toBe(
+            true,
+        );
+        expect(isUpcoming(event, "UTC", lateNightUtc)).toBe(false);
     });
 });
 
@@ -112,23 +124,27 @@ describe("selectNextGame", () => {
     const schedule = [homeGame, pastGame, awayGameSooner];
 
     it("picks the soonest upcoming game for type 'any'", () => {
-        expect(selectNextGame(schedule, "any", TEAM, NOW)).toBe(awayGameSooner);
+        expect(selectNextGame(schedule, "any", TEAM, "UTC", NOW)).toBe(
+            awayGameSooner,
+        );
     });
 
     it("filters to the team's home games", () => {
-        expect(selectNextGame(schedule, "home", TEAM, NOW)).toBe(homeGame);
+        expect(selectNextGame(schedule, "home", TEAM, "UTC", NOW)).toBe(
+            homeGame,
+        );
     });
 
     it("filters to the team's away games", () => {
-        expect(selectNextGame(schedule, "away", TEAM, NOW)).toBe(
+        expect(selectNextGame(schedule, "away", TEAM, "UTC", NOW)).toBe(
             awayGameSooner,
         );
     });
 
     it("returns null for an empty / all-past schedule", () => {
-        expect(selectNextGame([], "any", TEAM, NOW)).toBeNull();
-        expect(selectNextGame(null, "any", TEAM, NOW)).toBeNull();
-        expect(selectNextGame([pastGame], "any", TEAM, NOW)).toBeNull();
+        expect(selectNextGame([], "any", TEAM, "UTC", NOW)).toBeNull();
+        expect(selectNextGame(null, "any", TEAM, "UTC", NOW)).toBeNull();
+        expect(selectNextGame([pastGame], "any", TEAM, "UTC", NOW)).toBeNull();
     });
 });
 

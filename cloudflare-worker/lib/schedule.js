@@ -5,6 +5,8 @@
 // functions take an optional `nowMs` (defaulting to the real clock) so tests
 // can pin "now".
 
+import { ymdInZone } from "./localization.js";
+
 // TheSportsDB keeps recently-finished games in its schedule response for some
 // window. Treat a game as still upcoming until this long after kickoff,
 // covering the longest expected game across supported leagues (MLB ~3h).
@@ -29,12 +31,15 @@ export function isTimestampUpcoming(utcTimestamp, nowMs = Date.now()) {
     return startMs > nowMs - UPCOMING_GRACE_MS;
 }
 
-export function isUpcoming(event, nowMs = Date.now()) {
+export function isUpcoming(event, tz = "UTC", nowMs = Date.now()) {
     const ts = toUtcTimestamp(event.strTimestamp);
     if (ts && !isNaN(Date.parse(ts))) return isTimestampUpcoming(ts, nowMs);
-    // Fallback for events without a precise time: compare by date only.
+    // Fallback for events without a precise time: compare by date only, in the
+    // user's zone. ymdInZone keeps "today" aligned with the user's calendar
+    // around the UTC-midnight boundary (a UTC-naive compare can be off by a day
+    // for users behind UTC). Defaults to UTC when tz is absent.
     if (!event.dateEvent) return false;
-    return event.dateEvent >= new Date(nowMs).toISOString().slice(0, 10);
+    return event.dateEvent >= ymdInZone(new Date(nowMs), tz);
 }
 
 // Pick the soonest upcoming event matching the home/away filter for `teamId`.
@@ -42,9 +47,15 @@ export function isUpcoming(event, nowMs = Date.now()) {
 // events and sort ascending before .find() picks the first match. Home/away is
 // resolved locally so cross-league (cup/continental) fixtures stay visible.
 // Returns the chosen event, or null when nothing matches.
-export function selectNextGame(schedule, type, teamId, nowMs = Date.now()) {
+export function selectNextGame(
+    schedule,
+    type,
+    teamId,
+    tz = "UTC",
+    nowMs = Date.now(),
+) {
     const upcoming = (schedule || [])
-        .filter((e) => isUpcoming(e, nowMs))
+        .filter((e) => isUpcoming(e, tz, nowMs))
         .sort(
             (a, b) =>
                 (a.dateEvent || "").localeCompare(b.dateEvent || "") ||
