@@ -1,0 +1,10 @@
+{
+    "_note": "Cold-cache no-game state (e.g. season over): single team badge + localized 'No game found'.",
+    "found": false,
+    "team_badge": "https://r2.thesportsdb.com/images/media/team/badge/wqwwxx1423478766.png",
+    "team_badge_invert": false,
+    "team_badge_trim": { "x": 0.0508, "y": 0.002, "w": 0.8984, "h": 0.9961 },
+    "team_name": "New York Yankees",
+    "team_league_label": "MLB",
+    "not_found_message": "No game found"
+}

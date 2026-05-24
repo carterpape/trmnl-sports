@@ -1,0 +1,25 @@
+{
+    "_note": "Non-English rendering: server-localized German date/time labels (Heute / 19:35). Captured live with locale=de-DE&tz=Europe/Berlin.",
+    "found": true,
+    "home_team": "New York Yankees",
+    "away_team": "Tampa Bay Rays",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/wqwwxx1423478766.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/littyt1554031623.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": {
+        "x": 0.0508,
+        "y": 0.002,
+        "w": 0.8984,
+        "h": 0.9961
+    },
+    "away_team_badge_trim": { "x": 0, "y": 0.2461, "w": 1, "h": 0.5059 },
+    "start_utc_timestamp": "2026-05-24T17:35:00+00:00",
+    "date_label": "Heute",
+    "time_label": "19:35",
+    "venue": "Yankee Stadium",
+    "league": "MLB",
+    "sport": "Baseball",
+    "team_name": "New York Yankees",
+    "team_league_label": "MLB"
+}

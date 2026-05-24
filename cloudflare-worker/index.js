@@ -1,48 +1,19 @@
 import * as UPNG from "upng-js";
 
+import { LEAGUE_DISPLAY_NAMES, SUPPORTED_LEAGUE_IDS } from "./lib/constants.js";
+import {
+    asOfLabel,
+    notFoundMessage,
+    outageMessage,
+    parseLocale,
+    parseTimeZone,
+} from "./lib/localization.js";
+import { classifyNextGameCache, selectNextGame } from "./lib/schedule.js";
+import { formatEvent } from "./lib/format.js";
+import { searchTeams } from "./lib/search.js";
+import { computeBadgeStats, NO_BADGE_TRIM } from "./lib/badge.js";
+
 const API_BASE = "https://www.thesportsdb.com/api/v2/json";
-
-// Supported league IDs (TheSportsDB internal IDs)
-const SUPPORTED_LEAGUE_IDS = new Set([
-    // North America
-    4380, // NHL
-    4387, // NBA
-    4424, // MLB
-    4516, // WNBA
-    4521, // NWSL
-    4607, // NCAA Men's Basketball
-    5789, // NCAA Women's Basketball
-    4391, // NFL
-    4479, // NCAA Football (Division I)
-    4346, // MLS
-    4405, // CFL
-    // Europe (soccer)
-    4328, // English Premier League
-    4335, // Spanish La Liga
-    4331, // German Bundesliga
-    4332, // Italian Serie A
-    4334, // French Ligue 1
-    // Australia
-    4456, // AFL
-    4416, // NRL
-    // Cricket
-    4460, // Indian Premier League
-    4461, // Australian Big Bash League
-]);
-
-// TheSportsDB's `strLeague` is sometimes wordy or ambiguous (e.g. "NCAA
-// Division 1" doesn't say "Football"). Override the dropdown label for
-// these to keep the team-search list scannable.
-const LEAGUE_DISPLAY_NAMES = {
-    4346: "MLS",
-    4521: "NWSL",
-    4479: "NCAA Football",
-    4607: "NCAA Men's Basketball",
-    5789: "NCAA Women's Basketball",
-    4416: "NRL",
-    4456: "AFL",
-    4461: "Big Bash League",
-};
 
 const TEAMS_CACHE_TTL = 86400; // 24h — per-query search response cache
 const TEAM_INDEX_CACHE_TTL = 86400; // 24h — full team list across supported leagues
@@ -52,12 +23,6 @@ const NEXT_GAME_CACHE_TTL = 600; // 10 min — under TRMNL's 15-min poll interva
 // NEXT_GAME_CACHE_TTL — the worker reads X-Fetched-At to decide fresh vs. stale,
 // independent of this much-longer storage TTL.
 const LKG_CACHE_TTL = 7 * 86400; // 7 days
-const MAX_SEARCH_RESULTS = 20;
-
-// TheSportsDB keeps recently-finished games in its "next events" response for
-// some window. Treat a game as still upcoming until this long after kickoff,
-// covering the longest expected game across supported leagues (MLB ~3h).
-const UPCOMING_GRACE_MS = 4 * 60 * 60 * 1000;
 
 // Cache the per-badge analysis (invert decision + content bounding box) per
 // badge URL for a long time — team logos rarely change. Looked up via
@@ -68,195 +33,6 @@ const BADGE_ANALYSIS_CACHE_TTL = 30 * 86400; // 30 days
 // that many not-found responses share a single team lookup.
 const TEAM_META_CACHE_TTL = 30 * 86400; // 30 days
 
-// Mean luminance threshold (0–255). Above this, a badge's visible pixels are
-// considered "white-on-transparent" and templates should invert it so it
-// renders as dark-on-white on e-ink.
-const WHITE_BADGE_LUMA_THRESHOLD = 200;
-
-// Localized "no game found" copy keyed by language code (the part of an IETF
-// locale tag before the first hyphen). Falls back to English. Templates render
-// the localized string directly via {{ not_found_message }}.
-const NOT_FOUND_MESSAGES = {
-    en: "No game found",
-    es: "Sin partido",
-    de: "Kein Spiel",
-    fr: "Aucun match",
-    it: "Nessuna partita",
-    pt: "Sem jogo",
-    nl: "Geen wedstrijd",
-    sv: "Ingen match",
-    da: "Ingen kamp",
-    no: "Ingen kamp",
-    fi: "Ei ottelua",
-    pl: "Brak meczu",
-    ru: "Нет матчей",
-    ja: "試合なし",
-    ko: "경기 없음",
-    zh: "无比赛",
-};
-
-// Localized "can't reach the data source" copy, keyed like NOT_FOUND_MESSAGES.
-// Shown only when upstream is down AND there's no usable last-known-good to fall
-// back on — distinct from the genuine "no game found" so an outage doesn't read
-// as a finished season. Good-faith translations; review with a native speaker.
-const OUTAGE_MESSAGES = {
-    en: "Schedule unavailable",
-    es: "Calendario no disponible",
-    de: "Spielplan nicht verfügbar",
-    fr: "Calendrier indisponible",
-    it: "Calendario non disponibile",
-    pt: "Calendário indisponível",
-    nl: "Schema niet beschikbaar",
-    sv: "Schema ej tillgängligt",
-    da: "Plan utilgængelig",
-    no: "Plan utilgjengelig",
-    fi: "Aikataulu ei käytettävissä",
-    pl: "Harmonogram niedostępny",
-    ru: "Расписание недоступно",
-    ja: "日程を取得できません",
-    ko: "일정을 불러올 수 없음",
-    zh: "无法获取赛程",
-};
-
-// "as of <time>" affixes for the staleness marker, keyed like NOT_FOUND_MESSAGES.
-// `pre`/`post` place the marker around the localized timestamp — most languages
-// prefix it; Japanese/Korean suffix it (e.g. "19:00現在", "오후 7시 기준").
-// Good-faith translations; review with a native speaker.
-const AS_OF_AFFIXES = {
-    en: { pre: "as of " },
-    es: { pre: "a las " },
-    de: { pre: "Stand " },
-    fr: { pre: "à " },
-    it: { pre: "alle " },
-    pt: { pre: "às " },
-    nl: { pre: "vanaf " },
-    sv: { pre: "kl. " },
-    da: { pre: "kl. " },
-    no: { pre: "kl. " },
-    fi: { pre: "klo " },
-    pl: { pre: "stan na " },
-    ru: { pre: "на " },
-    ja: { post: "現在" },
-    ko: { post: " 기준" },
-    zh: { pre: "截至 " },
-};
-
-// Validate a locale tag, falling back when missing or unparseable. Catches
-// local-preview placeholders like the literal string "{{ trmnl.user.locale }}"
-// that arrive verbatim when trmnlp doesn't interpolate trmnl.* into URLs.
-function parseLocale(raw) {
-    if (!raw || raw.includes("{{")) return "en-US";
-    try {
-        new Intl.Locale(raw);
-        return raw;
-    } catch {
-        return "en-US";
-    }
-}
-
-// Validate an IANA time-zone string, falling back to UTC when missing or
-// unparseable. Same {{...}} guard as parseLocale.
-function parseTimeZone(raw) {
-    if (!raw || raw.includes("{{")) return "UTC";
-    try {
-        new Intl.DateTimeFormat("en-US", { timeZone: raw });
-        return raw;
-    } catch {
-        return "UTC";
-    }
-}
-
-function notFoundMessage(locale) {
-    const lang = locale.split("-")[0].toLowerCase();
-    return NOT_FOUND_MESSAGES[lang] || NOT_FOUND_MESSAGES.en;
-}
-
-function outageMessage(locale) {
-    const lang = locale.split("-")[0].toLowerCase();
-    return OUTAGE_MESSAGES[lang] || OUTAGE_MESSAGES.en;
-}
-
-// Capitalize the first character with locale-aware case mapping. Used to make
-// Intl.RelativeTimeFormat output ("today", "heute", "今日") render as a leading
-// capital where the locale supports it; locales with no case (Japanese, etc.)
-// pass through unchanged.
-function capitalizeFirst(s, locale) {
-    if (!s) return s;
-    return s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
-}
-
-// Returns the calendar date in the given IANA time zone, formatted YYYY-MM-DD.
-// Used to compare game day vs. today/tomorrow without DST or offset math.
-function ymdInZone(date, tz) {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone: tz,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(date);
-}
-
-function localizeDateLabel(gameMs, locale, tz) {
-    const now = new Date();
-    const todayYmd = ymdInZone(now, tz);
-    const tomorrowYmd = ymdInZone(new Date(now.getTime() + 86400000), tz);
-    const gameYmd = ymdInZone(new Date(gameMs), tz);
-
-    if (gameYmd === todayYmd || gameYmd === tomorrowYmd) {
-        const offset = gameYmd === todayYmd ? 0 : 1;
-        try {
-            const rtf = new Intl.RelativeTimeFormat(locale, {
-                numeric: "auto",
-            });
-            return capitalizeFirst(rtf.format(offset, "day"), locale);
-        } catch {
-            return offset === 0 ? "Today" : "Tomorrow";
-        }
-    }
-
-    return new Intl.DateTimeFormat(locale, {
-        timeZone: tz,
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-    }).format(new Date(gameMs));
-}
-
-function localizeTimeLabel(gameMs, locale, tz) {
-    let timeStr = new Intl.DateTimeFormat(locale, {
-        timeZone: tz,
-        hour: "numeric",
-        minute: "2-digit",
-    }).format(new Date(gameMs));
-
-    // AP-style lowercase periods for English locales; other locales' native
-    // formats (typically 24h) pass through untouched.
-    if (locale.toLowerCase().startsWith("en")) {
-        timeStr = timeStr.replace(/\bAM\b/g, "a.m.").replace(/\bPM\b/g, "p.m.");
-    }
-    return timeStr;
-}
-
-// "as of <time>" staleness marker for a last-known-good screen served during an
-// outage. Reuses localizeTimeLabel so the time format matches the live labels.
-// When the cached data was fetched on an earlier calendar day (in the user's
-// zone), prepend a compact date so a multi-day-old fetch doesn't read as today.
-function asOfLabel(fetchedAtMs, locale, tz) {
-    const lang = locale.split("-")[0].toLowerCase();
-    const affix = AS_OF_AFFIXES[lang] || AS_OF_AFFIXES.en;
-    let stamp = localizeTimeLabel(fetchedAtMs, locale, tz);
-    const fetched = new Date(fetchedAtMs);
-    if (ymdInZone(fetched, tz) !== ymdInZone(new Date(), tz)) {
-        const date = new Intl.DateTimeFormat(locale, {
-            timeZone: tz,
-            month: "short",
-            day: "numeric",
-        }).format(fetched);
-        stamp = `${date} ${stamp}`;
-    }
-    return `${affix.pre || ""}${stamp}${affix.post || ""}`;
-}
-
 function jsonResponse(data, { status = 200, cors = false, maxAge = 0 } = {}) {
     const headers = { "Content-Type": "application/json" };
     if (cors) headers["Access-Control-Allow-Origin"] = "*";
@@ -264,96 +40,15 @@ function jsonResponse(data, { status = 200, cors = false, maxAge = 0 } = {}) {
     return new Response(JSON.stringify(data), { status, headers });
 }
 
-// TheSportsDB timestamps lack explicit timezone info; treat as UTC.
-function toUtcTimestamp(strTimestamp) {
-    if (!strTimestamp) return null;
-    if (strTimestamp.includes("+") || strTimestamp.endsWith("Z"))
-        return strTimestamp;
-    return strTimestamp + "+00:00";
-}
-
-function formatEvent(
-    event,
-    {
-        homeInvert,
-        awayInvert,
-        homeTrim,
-        awayTrim,
-        locale,
-        tz,
-        teamId,
-        teamLeagueLabel,
-    },
-) {
-    const utcTimestamp = toUtcTimestamp(event.strTimestamp);
-    const gameMs = utcTimestamp ? Date.parse(utcTimestamp) : NaN;
-    const haveTime = !isNaN(gameMs);
-    const isHome = String(event.idHomeTeam) === String(teamId);
-    const teamName = isHome ? event.strHomeTeam : event.strAwayTeam;
-    return {
-        found: true,
-        home_team: event.strHomeTeam,
-        away_team: event.strAwayTeam,
-        home_team_badge: event.strHomeTeamBadge,
-        away_team_badge: event.strAwayTeamBadge,
-        home_team_badge_invert: homeInvert,
-        away_team_badge_invert: awayInvert,
-        home_team_badge_trim: homeTrim,
-        away_team_badge_trim: awayTrim,
-        start_utc_timestamp: utcTimestamp,
-        date_label: haveTime ? localizeDateLabel(gameMs, locale, tz) : "",
-        time_label: haveTime ? localizeTimeLabel(gameMs, locale, tz) : "",
-        venue: event.strVenue,
-        league: event.strLeague,
-        sport: event.strSport,
-        team_name: teamName || "",
-        team_league_label: teamLeagueLabel || event.strLeague || "",
-    };
-}
-
-// The neutral badge analysis: no inversion, no trim (full-canvas bbox). Used
-// whenever a badge can't be fetched/decoded, so templates can always rely on a
-// trim being present and fall back to today's untrimmed rendering.
-const NO_BADGE_TRIM = { x: 0, y: 0, w: 1, h: 1 };
-
-// Single pixel pass over a decoded badge. Computes two things at once:
-//   • invert — mean Rec. 709 luminance of opaque pixels exceeds the white
-//     threshold (white-on-transparent logos disappear after image-dither
-//     against the device's white background, so templates invert them).
-//   • trim — the opaque content's bounding box, as canvas fractions, so
-//     templates can clip the transparent padding and center the marks at any
-//     render size.
-function computeBadgeStats(rgba, width, height) {
-    let visible = 0;
-    let lumaSum = 0;
-    let minX = width;
-    let minY = height;
-    let maxX = -1;
-    let maxY = -1;
-    for (let i = 0; i < rgba.length; i += 4) {
-        if (rgba[i + 3] < 128) continue;
-        lumaSum +=
-            0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2];
-        visible++;
-        const p = i / 4;
-        const x = p % width;
-        const y = (p / width) | 0;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-    }
-    if (visible === 0) return { invert: false, trim: NO_BADGE_TRIM };
-    const round = (n) => Math.round(n * 1e4) / 1e4;
-    return {
-        invert: lumaSum / visible > WHITE_BADGE_LUMA_THRESHOLD,
-        trim: {
-            x: round(minX / width),
-            y: round(minY / height),
-            w: round((maxX - minX + 1) / width),
-            h: round((maxY - minY + 1) / height),
-        },
-    };
+// Build a synthetic GET cache key under the worker's own hostname. This lets
+// POST /teams (xhrSelectSearch) and any GET equivalents share the same cache
+// entry for the same query, and canonicalizes params so cache hits don't
+// depend on incidental URL ordering.
+function buildCacheKey(workerHostname, path, params) {
+    const search = new URLSearchParams(params).toString();
+    return new Request(`https://${workerHostname}/_cache${path}?${search}`, {
+        method: "GET",
+    });
 }
 
 // Analyze a badge for e-ink rendering: { invert, trim } (see computeBadgeStats).
@@ -437,36 +132,6 @@ async function fetchTeamMeta(teamId, env, hostname, ctx) {
     return meta;
 }
 
-// Is a UTC timestamp string still "upcoming" — at or before UPCOMING_GRACE_MS
-// after kickoff? Shared by the schedule filter (isUpcoming) and the stale
-// last-known-good guard, so both use one definition of "still worth showing".
-// Returns false for a missing/unparseable timestamp.
-function isTimestampUpcoming(utcTimestamp) {
-    if (!utcTimestamp) return false;
-    const startMs = Date.parse(utcTimestamp);
-    if (isNaN(startMs)) return false;
-    return startMs > Date.now() - UPCOMING_GRACE_MS;
-}
-
-function isUpcoming(event) {
-    const ts = toUtcTimestamp(event.strTimestamp);
-    if (ts && !isNaN(Date.parse(ts))) return isTimestampUpcoming(ts);
-    // Fallback for events without a precise time: compare by date only.
-    if (!event.dateEvent) return false;
-    return event.dateEvent >= new Date().toISOString().slice(0, 10);
-}
-
-// Build a synthetic GET cache key under the worker's own hostname. This lets
-// POST /teams (xhrSelectSearch) and any GET equivalents share the same cache
-// entry for the same query, and canonicalizes params so cache hits don't
-// depend on incidental URL ordering.
-function buildCacheKey(workerHostname, path, params) {
-    const search = new URLSearchParams(params).toString();
-    return new Request(`https://${workerHostname}/_cache${path}?${search}`, {
-        method: "GET",
-    });
-}
-
 // Fetch and cache the full team index across all supported leagues. SportsDB's
 // /search/team/ only matches city/team-name prefix — typing "Bulls" won't find
 // Chicago Bulls. We work around this by maintaining a local index of every
@@ -541,22 +206,11 @@ async function getTeamIndex(env, hostname, ctx, m) {
     return index;
 }
 
-// Rank a match: 0 = team name starts with query, 1 = any whitespace token in
-// team name starts with query (catches "Bulls" → "Chicago Bulls"), 2 = match
-// only via substring or alternate/keyword fields.
-function matchRank(team, q) {
-    const name = team.strTeam.toLowerCase();
-    if (name.startsWith(q)) return 0;
-    for (const token of name.split(/\s+/)) {
-        if (token.startsWith(q)) return 1;
-    }
-    return 2;
-}
-
 // GET /teams?q=SEARCH_TERM  (or POST with JSON body { query: "..." })
 // Returns teams matching the query, filtered to supported leagues,
 // in TRMNL xhrSelectSearch format. Matches against team name, alternate name,
-// and keywords via the cached team index — no upstream call per request.
+// and keywords via the cached team index (searchTeams) — no upstream call per
+// request once the index is warm.
 async function handleTeamsSearch(url, request, env, ctx, m) {
     let qRaw = (url.searchParams.get("q") || "").trim();
     if (!qRaw && request.method === "POST") {
@@ -581,18 +235,7 @@ async function handleTeamsSearch(url, request, env, ctx, m) {
     m.cache = "miss";
 
     const index = await getTeamIndex(env, url.hostname, ctx, m);
-    const matches = index
-        .filter((t) => t.searchBlob.includes(q))
-        .map((t) => ({ team: t, rank: matchRank(t, q) }))
-        .sort(
-            (a, b) =>
-                a.rank - b.rank || a.team.strTeam.localeCompare(b.team.strTeam),
-        )
-        .slice(0, MAX_SEARCH_RESULTS)
-        .map(({ team }) => ({
-            id: `${team.idTeam}|${team.idLeague}`,
-            name: `${team.strTeam} (${team.leagueLabel})`,
-        }));
+    const matches = searchTeams(index, q);
 
     const response = jsonResponse(matches, {
         cors: true,
@@ -646,10 +289,11 @@ async function outageTeamMeta(teamId, leagueIdFromUrl, env, hostname, ctx) {
 //
 // All three filters use /schedule/full/team/{id}, which returns the team's
 // full current-season schedule (~250-event cap) across every competition
-// they're entered in — including cup and continental fixtures. Home/away
-// filtering is done locally so cross-league matches stay visible regardless
-// of filter, and we can find the next home/away match anywhere in the
-// season rather than just within the next handful of events.
+// they're entered in — including cup and continental fixtures. The pure
+// selectNextGame (lib/schedule.js) does the upcoming-filter + sort + home/away
+// pick locally, so cross-league matches stay visible regardless of filter, and
+// we can find the next home/away match anywhere in the season rather than just
+// within the next handful of events.
 async function handleNextGame(url, env, ctx, m) {
     const teamParam = url.searchParams.get("team") || "";
     const type = url.searchParams.get("type") || "any";
@@ -685,10 +329,11 @@ async function handleNextGame(url, env, ctx, m) {
         tz,
     });
     // One durable cache entry per (team,type,locale,tz): stored with a long TTL
-    // plus an X-Fetched-At stamp, but the worker computes its own freshness.
-    // Fresh (< NEXT_GAME_CACHE_TTL old) → serve as a hit. Stale → keep it in hand
-    // as last-known-good and try to refresh; if upstream then fails we serve the
-    // stale copy rather than a misleading empty "no game" screen.
+    // plus an X-Fetched-At stamp, but the worker computes its own freshness via
+    // classifyNextGameCache. Fresh (< NEXT_GAME_CACHE_TTL old) → serve as a hit.
+    // Stale but still serveable → keep it as last-known-good and try to refresh;
+    // if upstream then fails we serve the stale copy rather than a misleading
+    // empty "no game" screen.
     const cached = await caches.default.match(key);
     let lkg = null;
     let fetchedAt = 0;
@@ -699,16 +344,17 @@ async function handleNextGame(url, env, ctx, m) {
         } catch {
             lkg = null; // Unexpected cache shape — treat as a miss, refetch.
         }
-        if (
-            lkg &&
-            fetchedAt &&
-            Date.now() - fetchedAt < NEXT_GAME_CACHE_TTL * 1000
-        ) {
-            m.cache = "hit";
-            // Re-wrap so TRMNL sees the short poll-cadence TTL, not the long
-            // durable TTL the stored entry carries.
-            return jsonResponse(lkg, { maxAge: NEXT_GAME_CACHE_TTL });
-        }
+    }
+    const { fresh, serveable } = classifyNextGameCache({
+        lkg,
+        fetchedAtMs: fetchedAt,
+        freshnessMs: NEXT_GAME_CACHE_TTL * 1000,
+    });
+    if (fresh) {
+        m.cache = "hit";
+        // Re-wrap so TRMNL sees the short poll-cadence TTL, not the long
+        // durable TTL the stored entry carries.
+        return jsonResponse(lkg, { maxAge: NEXT_GAME_CACHE_TTL });
     }
     m.cache = "miss";
 
@@ -719,29 +365,22 @@ async function handleNextGame(url, env, ctx, m) {
     m.upstream = res.ok ? "ok" : "fail";
     if (!res.ok) {
         m.upstreamFails = 1;
-        // Upstream is down. Serve last-known-good if we have something worth
-        // showing, so a blip doesn't masquerade as a finished season.
-        if (lkg) {
-            // THE GUARD: never re-serve a game whose start time has already
-            // passed — a 7-day durable entry routinely outlives the game it
-            // describes, and a confidently-wrong "next game" is worse than an
-            // honest outage message. A season-over (found:false) entry has no
-            // game to expire, so it's always still valid to re-show.
-            const serveStale =
-                lkg.found === false ||
-                isTimestampUpcoming(lkg.start_utc_timestamp);
-            if (serveStale) {
-                m.cache = "stale";
-                m.outcome = "stale";
-                return jsonResponse(
-                    {
-                        ...lkg,
-                        stale: true,
-                        as_of_label: asOfLabel(fetchedAt, locale, tz),
-                    },
-                    { maxAge: 0 },
-                );
-            }
+        // Upstream is down. Serve last-known-good if it's still worth showing.
+        // `serveable` is THE GUARD: a season-over (found:false) entry always
+        // re-shows, but a game entry is only re-served until its start passes —
+        // a 7-day durable entry routinely outlives the game it describes, and a
+        // confidently-wrong "next game" is worse than an honest outage message.
+        if (serveable) {
+            m.cache = "stale";
+            m.outcome = "stale";
+            return jsonResponse(
+                {
+                    ...lkg,
+                    stale: true,
+                    as_of_label: asOfLabel(fetchedAt, locale, tz),
+                },
+                { maxAge: 0 },
+            );
         }
         // Nothing usable to fall back on — say so honestly, but recover the
         // team's badge/name (from the 30-day team-meta cache) so the screen
@@ -766,21 +405,7 @@ async function handleNextGame(url, env, ctx, m) {
     }
 
     const data = await res.json();
-    // /schedule/full/team is not chronologically ordered — sort ascending so
-    // .find() picks the soonest matching event.
-    const upcoming = (data.schedule || [])
-        .filter(isUpcoming)
-        .sort(
-            (a, b) =>
-                (a.dateEvent || "").localeCompare(b.dateEvent || "") ||
-                (a.strTime || "").localeCompare(b.strTime || ""),
-        );
-    const event =
-        upcoming.find((e) => {
-            if (type === "home") return String(e.idHomeTeam) === String(teamId);
-            if (type === "away") return String(e.idAwayTeam) === String(teamId);
-            return true;
-        }) || null;
+    const event = selectNextGame(data.schedule, type, teamId);
 
     // Resolve the team's home-league display label. Prefer the URL's leagueId
     // (which TRMNL stores when the user picks the team from the dropdown). Fall

@@ -15,10 +15,24 @@ src/
   half_vertical.liquid
   quadrant.liquid
   shared.liquid        # Shared partials (date_time + badge templates)
+scripts/
+  render-gallery.sh    # Visual contact sheet of every render state (see "Visual gallery")
+test/
+  fixtures/
+    next-game-responses/  # One /next-game JSON per render state, fed to the gallery
 cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.dev)
-  index.js             # Worker source — two endpoints: /teams and /next-game
+  index.js             # Router + I/O handlers (fetch, cache, telemetry)
+  lib/                 # Pure logic, unit-tested (see "Testing")
+    constants.js       # SUPPORTED_LEAGUE_IDS, LEAGUE_DISPLAY_NAMES
+    localization.js    # locale/tz parse, date/time labels, messages, as-of marker
+    schedule.js        # upcoming predicate, selectNextGame, classifyNextGameCache
+    format.js          # formatEvent — raw event → /next-game payload
+    search.js          # matchRank, searchTeams
+    badge.js           # computeBadgeStats (invert + trim pixel math)
+  test/                # vitest unit tests (one file per lib module)
+  vitest.config.js     # Node env (no Workers pool — pure logic only)
   wrangler.toml        # Wrangler deploy config
-  package.json         # Worker npm deps (upng-js for badge analysis)
+  package.json         # Worker npm deps (upng-js; vitest dev dep)
 ```
 
 ## Publication
@@ -92,6 +106,35 @@ Gotchas:
 
 - **AE bindings don't exist in local `wrangler dev`** — `emit()` guards with `env.ANALYTICS?.`, so dev runs fine but writes nothing. Use `wrangler dev --remote` to exercise AE against the real binding.
 - **Backgrounded / non-TTY `wrangler dev` does not surface worker `console.log`** (it streams worker logs over the DevTools inspector channel, only rendered interactively; the `[wrangler:info] METHOD PATH STATUS` request lines are a separate always-on logger). Don't conclude logging is broken from a piped dev session — verify logs via `wrangler tail`, the dashboard Query Builder, or the `cloudflare-observability` MCP (`query_worker_observability`) against the deployed worker. (Running dev under a real TTY via `script` instead triggers wrangler's interactive "install skills?" prompt and blocks.)
+
+## Testing
+
+Two layers, deliberately separate (full rationale in the testing-session pape-docs):
+
+### Worker logic (unit tests)
+
+The worker's pure logic lives in `cloudflare-worker/lib/` so it's importable and testable without bindings. Tests run in plain Node via **vitest** — no `@cloudflare/vitest-pool-workers`, because nothing under test touches the Workers runtime (`Intl`/`Response`/`Request` are Node globals; `computeBadgeStats` takes a raw RGBA array, so no `upng`).
+
+```bash
+cd cloudflare-worker
+npm install        # vitest is a dev dep
+npm test           # vitest run  (one test file per lib module)
+npm run test:watch
+```
+
+The I/O handlers (`handleNextGame`, `handleTeamsSearch`, `fetchTeamMeta`, `analyzeBadge`, `emit`, …) and the router stay in `index.js`, untested for now — testing them needs binding/cache mocks. The high-value logic that *was* buried in `handleNextGame` is extracted as pure functions and covered: `selectNextGame` (upcoming-filter + sort + home/away pick) and `classifyNextGameCache` (fresh / stale-but-serveable — the stale guard that refuses to re-serve a started game). Time-dependent functions take an optional `nowMs` (default `Date.now()`) so tests pin "now". The deferred full handler split → thin-router `index.js` is written up in `pape-docs/0073`; smells noticed-but-not-fixed during the extraction are in `pape-docs/0074`.
+
+### Visual rendering (`scripts/render-gallery.sh`)
+
+Templates render to dithered e-ink PNGs you *look at*, so the visual layer is a human-eyeball contact sheet, not pixel-diff. The gallery renders every fixture in `test/fixtures/next-game-responses/` across all four views into one labeled contact sheet.
+
+```bash
+scripts/render-gallery.sh                       # all states × 4 views → contact sheet
+scripts/render-gallery.sh --view full           # one view across all states
+scripts/render-gallery.sh --device v2           # render on TRMNL X
+```
+
+It's **hermetic**: it serves the fixtures over a local static server and points `variables.trmnl.plugin_settings.polling_url` at them, so the fixture *is* the polled response — edge states the live backend won't produce on demand (stale, outage, long names) render exactly. It backs up and restores your real `.trmnlp.yml`. Because trmnlp reads config (and re-polls) only at startup, the managed `trmnlp serve` is restarted once per fixture (~30s each) — a full run is a few minutes; it's an occasional check. Output lands in `$TMPDIR/trmnl-sports-gallery/`; the combined sheet path prints on stdout. To add a render state, drop another `*.json` (a full `/next-game` response) into the fixtures dir.
 
 ## TheSportsDB API
 

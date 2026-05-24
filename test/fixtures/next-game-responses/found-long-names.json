@@ -1,0 +1,25 @@
+{
+    "_note": "Stress-tests long team names + a long league label against the title bar and layout overflow across views.",
+    "found": true,
+    "home_team": "University of California, Los Angeles Bruins",
+    "away_team": "Southern Methodist University Mustangs",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/wqwwxx1423478766.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/littyt1554031623.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": {
+        "x": 0.0508,
+        "y": 0.002,
+        "w": 0.8984,
+        "h": 0.9961
+    },
+    "away_team_badge_trim": { "x": 0, "y": 0.2461, "w": 1, "h": 0.5059 },
+    "start_utc_timestamp": "2026-05-30T23:00:00+00:00",
+    "date_label": "Saturday, May 30",
+    "time_label": "7:00 p.m.",
+    "venue": "Rose Bowl",
+    "league": "NCAA Football",
+    "sport": "American Football",
+    "team_name": "University of California, Los Angeles Bruins",
+    "team_league_label": "NCAA Football"
+}

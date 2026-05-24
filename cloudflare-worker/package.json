@@ -1,27 +1,32 @@
 {
-  "name": "trmnl-sports-worker",
-  "version": "1.0.0",
-  "description": "Cloudflare Worker backend for the TRMNL Sports plugin. Proxies TheSportsDB v2 API for team search and next-game lookups.",
-  "main": "index.js",
-  "scripts": {
-    "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
-  },
-  "keywords": [
-    "trmnl",
-    "cloudflare-workers",
-    "thesportsdb",
-    "sports"
-  ],
-  "author": "Carter Pape",
-  "license": "GPL-3.0-or-later",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/CarterPape/trmnl-sports.git",
-    "directory": "cloudflare-worker"
-  },
-  "type": "module",
-  "dependencies": {
-    "upng-js": "^2.1.0"
-  }
+    "name": "trmnl-sports-worker",
+    "version": "1.0.0",
+    "description": "Cloudflare Worker backend for the TRMNL Sports plugin. Proxies TheSportsDB v2 API for team search and next-game lookups.",
+    "main": "index.js",
+    "scripts": {
+        "deploy": "wrangler deploy",
+        "tail": "wrangler tail",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "keywords": [
+        "trmnl",
+        "cloudflare-workers",
+        "thesportsdb",
+        "sports"
+    ],
+    "author": "Carter Pape",
+    "license": "GPL-3.0-or-later",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/CarterPape/trmnl-sports.git",
+        "directory": "cloudflare-worker"
+    },
+    "type": "module",
+    "dependencies": {
+        "upng-js": "^2.1.0"
+    },
+    "devDependencies": {
+        "vitest": "^3.0.0"
+    }
 }
