@@ -30,9 +30,10 @@ cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.d
     search.js          # matchRank, searchTeams
     badge.js           # computeBadgeStats (invert + trim pixel math)
   test/                # vitest unit tests (one file per lib module)
-  vitest.config.js     # Node env (no Workers pool — pure logic only)
+    integration/       # fetch-boundary handler tests (Workers pool) — see "Testing"
+  vitest.config.js     # Two projects: lib (Node) + integration (Workers pool)
   wrangler.toml        # Wrangler deploy config
-  package.json         # Worker npm deps (upng-js; vitest dev dep)
+  package.json         # Worker npm deps (upng-js; vitest + pool + coverage dev deps)
 ```
 
 ## Publication
@@ -111,20 +112,33 @@ Gotchas:
 
 ## Testing
 
-Two layers, deliberately separate (full rationale in the testing-session pape-docs):
+Three layers, deliberately separate (full rationale in the testing-session pape-docs):
 
 ### Worker logic (unit tests)
 
-The worker's pure logic lives in `cloudflare-worker/lib/` so it's importable and testable without bindings. Tests run in plain Node via **vitest** — no `@cloudflare/vitest-pool-workers`, because nothing under test touches the Workers runtime (`Intl`/`Response`/`Request` are Node globals; `computeBadgeStats` takes a raw RGBA array, so no `upng`).
+The worker's pure logic lives in `cloudflare-worker/lib/` so it's importable and testable without bindings. These run in plain Node via **vitest** (the `lib` project) — no Workers runtime needed, because nothing under test touches it (`Intl`/`Response`/`Request` are Node globals; `computeBadgeStats` takes a raw RGBA array, so no `upng`). The handler integration layer below *does* run under `@cloudflare/vitest-pool-workers`; one `npm test` runs both projects.
 
 ```bash
 cd cloudflare-worker
-npm install        # vitest is a dev dep
-npm test           # vitest run  (one test file per lib module)
+npm install        # vitest + @cloudflare/vitest-pool-workers + coverage-istanbul
+npm test           # vitest run — BOTH projects (lib + integration)
 npm run test:watch
 ```
 
-The I/O handlers (`handleNextGame`, `handleTeamsSearch`, `fetchTeamMeta`, `analyzeBadge`, `emit`, …) and the router stay in `index.js`, untested for now — testing them needs binding/cache mocks. The high-value logic that *was* buried in `handleNextGame` is extracted as pure functions and covered: `selectNextGame` (upcoming-filter + sort + home/away pick) and `classifyNextGameCache` (fresh / stale-but-serveable — the stale guard that refuses to re-serve a started game). Time-dependent functions take an optional `nowMs` (default `Date.now()`) so tests pin "now". The deferred full handler split → thin-router `index.js` is written up in `pape-docs/0073`; smells noticed-but-not-fixed during the extraction are in `pape-docs/0074`.
+The high-value logic that *was* buried in `handleNextGame` is extracted as pure functions and covered here: `selectNextGame` (upcoming-filter + sort + home/away pick) and `classifyNextGameCache` (fresh / stale-but-serveable — the stale guard that refuses to re-serve a started game). Time-dependent functions take an optional `nowMs` (default `Date.now()`) so tests pin "now". The deferred full handler split → thin-router `index.js` is written up in `pape-docs/0073`; smells noticed-but-not-fixed during the extraction are in `pape-docs/0074`.
+
+### Handler integration tests (`test/integration/`)
+
+The I/O handlers (`handleNextGame`, `handleTeamsSearch`, `fetchTeamMeta`, `analyzeBadge`, `emit`) and the router are tested at the **`fetch` boundary** — `worker.fetch(request, env, ctx)` called directly in real `workerd` via `@cloudflare/vitest-pool-workers`, with a **hand-built `env`** (not config bindings) so the telemetry datapoint and the rate-limit/error branches are assertable. Boundary tests are invariant under the deferred 0073 handler split — that's the point: a green run proves the move preserved behavior. Full design, fixture plan, and per-branch checklist: `pape-docs/0076`.
+
+- `_harness.js` — `makeEnv()` (stub `RATE_LIMITER`, spy `ANALYTICS`), `decodeDatapoint()` (pins the AE positional column contract), `installFetchMock()`, `makeBadgePng()`.
+- **Status: walking skeleton only** — router 404 + one real `upng` badge-decode smoke. The `/teams` and `/next-game` matrices are still to come (0076 chunks 1–3).
+
+Toolchain gotchas (the pool moved a lot since 0076 was drafted — full account in that doc's "Toolchain reality" note):
+
+- **Default-import CJS deps:** `import UPNG from "upng-js"`, *not* `import * as`. The pool's Vite/rollup bundler exposes a CJS module's exports only under `.default`, while wrangler's esbuild spreads them onto the namespace; the default import resolves under both (and Node). With `import * as`, `UPNG.decode` is `undefined` under the pool and decode silently hits its fallback. Prod (esbuild) is unaffected, but tests are — so reach for the default import for any CJS dep the handlers call.
+- **Mock outbound `fetch` with `vi.stubGlobal("fetch", …)`** (wrapped in `installFetchMock`) — the pool's old `fetchMock` from `cloudflare:test` is gone in 0.16. The worker shares the test isolate, so a global stub applies to it.
+- **Coverage uses the Istanbul provider** (`@vitest/coverage-istanbul`), not V8 — the pool doesn't support native V8 coverage. `npx vitest run --coverage` reports on `index.js` (no `fail_under` gate yet).
 
 ### Visual rendering (`scripts/render-gallery.sh`)
 

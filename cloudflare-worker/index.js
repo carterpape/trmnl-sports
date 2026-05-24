@@ -1,4 +1,10 @@
-import * as UPNG from "upng-js";
+// Default import (not `import * as`): upng-js is CommonJS, and bundler CJS↔ESM
+// interop differs — wrangler's esbuild spreads the named exports onto the
+// namespace, but Vite/rollup (the vitest-pool-workers test bundler) exposes
+// them only under `.default`. The default import resolves to the module's
+// exports object under every bundler, so `UPNG.decode` is defined in both prod
+// and tests. (Discovered standing up the 0076 integration suite.)
+import UPNG from "upng-js";
 
 import { LEAGUE_DISPLAY_NAMES, SUPPORTED_LEAGUE_IDS } from "./lib/constants.js";
 import {

@@ -27,6 +27,8 @@
         "upng-js": "^2.1.0"
     },
     "devDependencies": {
-        "vitest": "^3.0.0"
+        "@cloudflare/vitest-pool-workers": "^0.16.9",
+        "@vitest/coverage-istanbul": "^4.1.0",
+        "vitest": "^4.1.0"
     }
 }
