@@ -2,3 +2,13 @@
   <span class="{{ date_class | default: 'value lg:value--large' }}">{{ date_label }}</span>
   <span class="{{ time_class | default: 'value lg:value--large' }}">{{ time_label }}</span>
 {% endtemplate %}
+
+{% template badge %}
+  {% assign tx = trim.x | default: 0 %}
+  {% assign ty = trim.y | default: 0 %}
+  {% assign tw = trim.w | default: 1 %}
+  {% assign th = trim.h | default: 1 %}
+  <div class="badge-clip {{ size_class }}" style="aspect-ratio: {{ tw }} / {{ th }}; overflow: hidden;">
+    <img class="image-dither" src="{{ src }}" style="width: calc(100% / {{ tw }}); height: auto; max-width: none; display: block; transform: translate(calc({{ tx }} * -100%), calc({{ ty }} * -100%));{% if invert %} filter: invert(1);{% endif %}">
+  </div>
+{% endtemplate %}

@@ -54,9 +54,10 @@ const MAX_SEARCH_RESULTS = 20;
 // covering the longest expected game across supported leagues (MLB ~3h).
 const UPCOMING_GRACE_MS = 4 * 60 * 60 * 1000;
 
-// Cache the badge-invert decision per badge URL for a long time — team logos
-// rarely change. Looked up via caches.default; recomputed on cache miss.
-const BADGE_INVERT_CACHE_TTL = 30 * 86400; // 30 days
+// Cache the per-badge analysis (invert decision + content bounding box) per
+// badge URL for a long time — team logos rarely change. Looked up via
+// caches.default; recomputed on cache miss.
+const BADGE_ANALYSIS_CACHE_TTL = 30 * 86400; // 30 days
 
 // Cache the team metadata lookup separately from the not-found response so
 // that many not-found responses share a single team lookup.
@@ -197,7 +198,16 @@ function toUtcTimestamp(strTimestamp) {
 
 function formatEvent(
     event,
-    { homeInvert, awayInvert, locale, tz, teamId, teamLeagueLabel },
+    {
+        homeInvert,
+        awayInvert,
+        homeTrim,
+        awayTrim,
+        locale,
+        tz,
+        teamId,
+        teamLeagueLabel,
+    },
 ) {
     const utcTimestamp = toUtcTimestamp(event.strTimestamp);
     const gameMs = utcTimestamp ? Date.parse(utcTimestamp) : NaN;
@@ -212,6 +222,8 @@ function formatEvent(
         away_team_badge: event.strAwayTeamBadge,
         home_team_badge_invert: homeInvert,
         away_team_badge_invert: awayInvert,
+        home_team_badge_trim: homeTrim,
+        away_team_badge_trim: awayTrim,
         start_utc_timestamp: utcTimestamp,
         date_label: haveTime ? localizeDateLabel(gameMs, locale, tz) : "",
         time_label: haveTime ? localizeTimeLabel(gameMs, locale, tz) : "",
@@ -223,50 +235,86 @@ function formatEvent(
     };
 }
 
-// Decide whether a badge needs inversion to be visible on e-ink. White-on-
-// transparent badges disappear after image-dither against the device's white
-// background; we detect them by sampling the badge's pixels and measuring
-// the mean luminance of opaque content. Decision is cached per badge URL.
-async function shouldInvertBadge(url, hostname, ctx) {
-    if (!url) return false;
+// The neutral badge analysis: no inversion, no trim (full-canvas bbox). Used
+// whenever a badge can't be fetched/decoded, so templates can always rely on a
+// trim being present and fall back to today's untrimmed rendering.
+const NO_BADGE_TRIM = { x: 0, y: 0, w: 1, h: 1 };
 
-    const key = buildCacheKey(hostname, "/_badge-invert", { url });
+// Single pixel pass over a decoded badge. Computes two things at once:
+//   • invert — mean Rec. 709 luminance of opaque pixels exceeds the white
+//     threshold (white-on-transparent logos disappear after image-dither
+//     against the device's white background, so templates invert them).
+//   • trim — the opaque content's bounding box, as canvas fractions, so
+//     templates can clip the transparent padding and center the marks at any
+//     render size.
+function computeBadgeStats(rgba, width, height) {
+    let visible = 0;
+    let lumaSum = 0;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    for (let i = 0; i < rgba.length; i += 4) {
+        if (rgba[i + 3] < 128) continue;
+        lumaSum +=
+            0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2];
+        visible++;
+        const p = i / 4;
+        const x = p % width;
+        const y = (p / width) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+    }
+    if (visible === 0) return { invert: false, trim: NO_BADGE_TRIM };
+    const round = (n) => Math.round(n * 1e4) / 1e4;
+    return {
+        invert: lumaSum / visible > WHITE_BADGE_LUMA_THRESHOLD,
+        trim: {
+            x: round(minX / width),
+            y: round(minY / height),
+            w: round((maxX - minX + 1) / width),
+            h: round((maxY - minY + 1) / height),
+        },
+    };
+}
+
+// Analyze a badge for e-ink rendering: { invert, trim } (see computeBadgeStats).
+// Cached per badge URL as JSON.
+async function analyzeBadge(url, hostname, ctx) {
+    if (!url) return { invert: false, trim: NO_BADGE_TRIM };
+
+    const key = buildCacheKey(hostname, "/_badge-analysis", { url });
     const cached = await caches.default.match(key);
-    if (cached) return (await cached.text()) === "true";
+    if (cached) {
+        try {
+            return JSON.parse(await cached.text());
+        } catch {
+            // Unexpected cache shape (e.g. legacy boolean) — recompute below.
+        }
+    }
 
-    let invert = false;
+    let result = { invert: false, trim: NO_BADGE_TRIM };
     try {
         const res = await fetch(url);
         if (res.ok) {
             const buf = await res.arrayBuffer();
             const decoded = UPNG.decode(buf);
             const rgba = new Uint8Array(UPNG.toRGBA8(decoded)[0]);
-            let visible = 0;
-            let lumaSum = 0;
-            for (let i = 0; i < rgba.length; i += 4) {
-                if (rgba[i + 3] < 128) continue;
-                // Rec. 709 luminance
-                lumaSum +=
-                    0.2126 * rgba[i] +
-                    0.7152 * rgba[i + 1] +
-                    0.0722 * rgba[i + 2];
-                visible++;
-            }
-            if (visible > 0 && lumaSum / visible > WHITE_BADGE_LUMA_THRESHOLD) {
-                invert = true;
-            }
+            result = computeBadgeStats(rgba, decoded.width, decoded.height);
         }
     } catch {
-        // Decode failed (non-PNG, paletted edge case, etc.) — leave invert false.
+        // Decode failed (non-PNG, paletted edge case, etc.) — leave neutral.
     }
 
-    const cacheResponse = new Response(String(invert), {
+    const cacheResponse = new Response(JSON.stringify(result), {
         headers: {
-            "Cache-Control": `public, max-age=${BADGE_INVERT_CACHE_TTL}`,
+            "Cache-Control": `public, max-age=${BADGE_ANALYSIS_CACHE_TTL}`,
         },
     });
     ctx.waitUntil(caches.default.put(key, cacheResponse.clone()));
-    return invert;
+    return result;
 }
 
 // Look up a team's badge, name, and league by team ID. Used to populate the
@@ -570,26 +618,29 @@ async function handleNextGame(url, env, ctx, m) {
 
     let payload;
     if (event) {
-        const [homeInvert, awayInvert] = await Promise.all([
-            shouldInvertBadge(event.strHomeTeamBadge, url.hostname, ctx),
-            shouldInvertBadge(event.strAwayTeamBadge, url.hostname, ctx),
+        const [home, away] = await Promise.all([
+            analyzeBadge(event.strHomeTeamBadge, url.hostname, ctx),
+            analyzeBadge(event.strAwayTeamBadge, url.hostname, ctx),
         ]);
         payload = formatEvent(event, {
-            homeInvert,
-            awayInvert,
+            homeInvert: home.invert,
+            awayInvert: away.invert,
+            homeTrim: home.trim,
+            awayTrim: away.trim,
             locale,
             tz,
             teamId,
             teamLeagueLabel,
         });
     } else {
-        const invert = teamMeta.badge
-            ? await shouldInvertBadge(teamMeta.badge, url.hostname, ctx)
-            : false;
+        const { invert, trim } = teamMeta.badge
+            ? await analyzeBadge(teamMeta.badge, url.hostname, ctx)
+            : { invert: false, trim: NO_BADGE_TRIM };
         payload = {
             found: false,
             team_badge: teamMeta.badge,
             team_badge_invert: invert,
+            team_badge_trim: trim,
             team_name: teamMeta.name || "",
             team_league_label: teamLeagueLabel,
             not_found_message: notFoundMessage(locale),

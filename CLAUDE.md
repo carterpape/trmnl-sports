@@ -14,7 +14,7 @@ src/
   half_horizontal.liquid
   half_vertical.liquid
   quadrant.liquid
-  shared.liquid        # Shared partials (date_time template)
+  shared.liquid        # Shared partials (date_time + badge templates)
 cloudflare-worker/     # Backend (deployed at trmnl-sports.carter-pape.workers.dev)
   index.js             # Worker source — two endpoints: /teams and /next-game
   wrangler.toml        # Wrangler deploy config
@@ -36,9 +36,14 @@ Deployed at: `https://trmnl-sports.carter-pape.workers.dev`
 
 **CORS:** Only `/teams` returns CORS headers (it's browser-fetched via xhrSelectSearch). `/next-game` is server-polled by TRMNL and returns no CORS. `OPTIONS /next-game` returns 405.
 
-**Badge invert auto-detection:** The `/next-game` response includes `home_team_badge_invert` and `away_team_badge_invert` flags. The worker fetches each badge PNG (via `upng-js`), measures the mean luminance of opaque pixels, and flags badges above `WHITE_BADGE_LUMA_THRESHOLD` (200/255) as needing `filter: invert(1)` in templates. This catches white-on-transparent logos (e.g. Trail Blazers) that would otherwise render as invisible after `image-dither` against the device's white background. The decision is cached per badge URL for 30 days. Templates use `{% if X_team_badge_invert %}style="filter: invert(1);"{% endif %}` on each badge `<img>`.
+**Badge analysis (invert + trim):** The worker decodes each badge PNG once (via `upng-js`) in `analyzeBadge`; one pixel pass yields `{ invert, trim }`, cached per badge URL as JSON for 30 days (cache key `/_badge-analysis`, TTL `BADGE_ANALYSIS_CACHE_TTL`). The `/next-game` response carries `*_badge_invert` and `*_badge_trim` for both teams (and `team_badge_*` in the not-found state).
 
-Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts white-on-transparent logos to black, but symmetrically *breaks* black-on-transparent logos (e.g. Spurs) by inverting them to invisible-white. Any single CSS transformation can only fix one polarity; per-pixel detection is the only universal fix.
+- **`invert`** — mean Rec. 709 luminance of opaque pixels > `WHITE_BADGE_LUMA_THRESHOLD` (200/255). White-on-transparent logos vanish after `image-dither` against the device's white background, so templates apply `filter: invert(1)`.
+- **`trim`** — opaque content bounding box as canvas fractions `{x,y,w,h}` (`{0,0,1,1}` = no trim, the decode-failure fallback). TheSportsDB badges are square canvases with varying transparent padding; untrimmed, marks render at inconsistent sizes and the `@` sits asymmetrically between them.
+
+The shared `badge` partial (`shared.liquid`) consumes both: it clips each badge to its content via an `overflow: hidden` wrapper (sized by the layout's `h--`/`w--` class, `aspect-ratio` = content ratio) with the `<img>` scaled (`width: calc(100% / w)`) and `transform: translate`d so only the opaque content shows, plus the invert filter when flagged. Every mark then renders edge-to-edge and hugs the `@`, self-maintaining for any team. `half_vertical` sizes its side-by-side badges by **height** (not width) so trimmed marks stay equal-height and aligned, matching `full`/`half_horizontal`. Full design + rejected alternatives: `pape-docs/0067`.
+
+Why per-pixel, not CSS-only: a single CSS transform can't fix both logo polarities — `mix-blend-mode: difference` over white inverts white-on-transparent logos to black but symmetrically *breaks* black-on-transparent ones (e.g. Spurs) into invisible-white. And a flex `justify-content` tweak can't center the `@`, because the transparent padding lives *inside* the square `<img>`: flex moves the box, not the centered mark within it. Per-pixel measurement is the only universal fix for both.
 
 ### Endpoints
 
@@ -56,7 +61,7 @@ Why this and not CSS: `mix-blend-mode: difference` over white correctly inverts 
 - The `LEAGUE_ID` half of the team param drives the `team_league_label` shown in the title bar (mapped through `LEAGUE_DISPLAY_NAMES`, falling back to the team's `strLeague` via the team-meta lookup). Using the URL's leagueId rather than the next event's `strLeague` keeps the label stable across cup/continental fixtures.
 - `locale` and `tz` are passed through from `{{ trmnl.user.locale }}` / `{{ trmnl.user.time_zone_iana }}`. The worker uses them to localize `date_label` ("Today", "Heute", "Wednesday, May 1") and `time_label` ("7:00 p.m.", "19:00") on the server, so templates render the strings as-is. Both have a placeholder guard — a literal `{{...}}` string from un-interpolated template syntax falls back to en-US/UTC.
 - Returns a flat event object (see index.js `formatEvent`) when a game is found, including pre-localized `date_label`/`time_label`, the raw `start_utc_timestamp`, and the configured team's `team_name` (resolved by matching `idHomeTeam`/`idAwayTeam` against the URL's teamId) plus `team_league_label`.
-- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>, "team_name": "...", "team_league_label": "...", "not_found_message": "..."}`. Team badge, name, and league are looked up via `/lookup/team/{id}` and cached 30 days under cache key `/_team-meta` (returned as a `{badge, name, idLeague, strLeague}` JSON blob — see `fetchTeamMeta`). `not_found_message` is the localized "No game found" string keyed off the locale's language code (`NOT_FOUND_MESSAGES` table; falls back to English).
+- When no game is found, returns `{"found": false, "team_badge": <url|null>, "team_badge_invert": <bool>, "team_badge_trim": {x,y,w,h}, "team_name": "...", "team_league_label": "...", "not_found_message": "..."}`. Team badge, name, and league are looked up via `/lookup/team/{id}` and cached 30 days under cache key `/_team-meta` (returned as a `{badge, name, idLeague, strLeague}` JSON blob — see `fetchTeamMeta`). `not_found_message` is the localized "No game found" string keyed off the locale's language code (`NOT_FOUND_MESSAGES` table; falls back to English).
 
 ### Redeploy after changes
 
@@ -157,5 +162,4 @@ custom_fields:
 
 ## Known open items
 
-- **Logo centering** — logos with varying amounts of transparent padding can make the `@` symbol appear off-center. See `0067 Claude diary 2026-03-29.md` for the plan (CSS-first, then weserv.nl trim proxy if needed).
 - **League allowlist** — `SUPPORTED_LEAGUE_IDS` may be loosened in the future to allow any TheSportsDB team.

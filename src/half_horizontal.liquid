@@ -2,7 +2,7 @@
 <div class="layout">
   {% if team_badge %}
   <div class="flex flex--col gap--xsmall no-shrink">
-    <img class="image-dither h--32 lg:h--48" src="{{ team_badge }}"{% if team_badge_invert %} style="filter: invert(1);"{% endif %}>
+    {% render "badge", src: team_badge, invert: team_badge_invert, trim: team_badge_trim, size_class: "h--32 lg:h--48" %}
   </div>
   {% endif %}
   <div class="flex flex--col no-shrink">
@@ -12,13 +12,13 @@
 {% else %}
 <div class="layout">
   <div class="flex flex--col gap--xsmall no-shrink">
-    <img class="image-dither h--32 lg:h--48" src="{{ away_team_badge }}"{% if away_team_badge_invert %} style="filter: invert(1);"{% endif %}>
+    {% render "badge", src: away_team_badge, invert: away_team_badge_invert, trim: away_team_badge_trim, size_class: "h--32 lg:h--48" %}
   </div>
   <div class="flex flex--col gap--xsmall">
     <span class="value value--small lg:value--xlarge">@</span>
   </div>
   <div class="flex flex--col gap--xsmall no-shrink">
-    <img class="image-dither h--32 lg:h--48" src="{{ home_team_badge }}"{% if home_team_badge_invert %} style="filter: invert(1);"{% endif %}>
+    {% render "badge", src: home_team_badge, invert: home_team_badge_invert, trim: home_team_badge_trim, size_class: "h--32 lg:h--48" %}
   </div>
   <div class="flex flex--col no-shrink">
     {% render "date_time", date_label: date_label, time_label: time_label %}
