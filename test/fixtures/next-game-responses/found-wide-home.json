@@ -1,0 +1,23 @@
+{
+    "found": true,
+    "home_team": "Athletics",
+    "away_team": "Seattle Mariners",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/cyvrv31741640777.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/39x9ph1521903933.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": {
+        "x": 0.002,
+        "y": 0.0898,
+        "w": 0.998,
+        "h": 0.8203
+    },
+    "away_team_badge_trim": { "x": 0, "y": 0.002, "w": 1, "h": 0.998 },
+    "start_utc_timestamp": "2026-05-26T01:40:00+00:00",
+    "date_label": "Tuesday, May 26",
+    "time_label": "6:40 p.m.",
+    "venue": "Sutter Health Park",
+    "league": "MLB",
+    "team_name": "Athletics",
+    "team_league_label": "MLB"
+}

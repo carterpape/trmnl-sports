@@ -224,3 +224,4 @@ custom_fields:
 ## Known open items
 
 - **League allowlist** — `SUPPORTED_LEAGUE_IDS` may be loosened in the future to allow any TheSportsDB team.
+- **`half_vertical` overflows on wide logos** — two rectangular logos (e.g. Rays 1.98, Hurricanes 1.66 @ Canadiens 1.48) exceed the ~400px width of the narrow `half_vertical` matchup row at `h--32`. A width-budget problem, separate from the `0077` `max-height` sizing fix; only `half_vertical` is affected. Repro + candidate fixes: `pape-docs/0078`.
