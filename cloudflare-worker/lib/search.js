@@ -1,7 +1,9 @@
-// Pure team-search ranking over the cached team index. The I/O (building and
-// caching the index) lives in index.js; this module just ranks and shapes the
-// matches into TRMNL's xhrSelectSearch format. `q` is expected pre-lowercased
-// by the caller (matchRank and the index's searchBlob are both lowercase).
+// Pure team-search ranking over the cached team index, plus the codec for the
+// composite `TEAM_ID|LEAGUE_ID` param it emits. The I/O (building and caching
+// the index) lives in index.js; this module ranks and shapes the matches into
+// TRMNL's xhrSelectSearch format, and parses the param back on the way in. `q`
+// is expected pre-lowercased by the caller (matchRank and the index's
+// searchBlob are both lowercase).
 
 const MAX_SEARCH_RESULTS = 20;
 
@@ -33,4 +35,20 @@ export function searchTeams(index, q, max = MAX_SEARCH_RESULTS) {
             id: `${team.idTeam}|${team.idLeague}`,
             name: `${team.strTeam} (${team.leagueLabel})`,
         }));
+}
+
+// Decode the composite team param — the inverse of the `id` searchTeams emits.
+// We hand TRMNL `TEAM_ID|LEAGUE_ID`, but TRMNL stores the *picked* option as
+// `value::label`, so a real device poll arrives as
+// `TEAM_ID|LEAGUE_ID::Team Name (League)` (pape-docs/0081). parseInt reads the
+// leading integer off the league half, ignoring any trailing `::label` — where
+// Number() of the whole string would be NaN and silently defeat the title-bar
+// label override. leagueId comes back as a clean number | null (never NaN).
+export function parseTeamParam(teamParam) {
+    const [teamId, leagueRaw] = (teamParam || "").split("|");
+    const leagueId = leagueRaw ? parseInt(leagueRaw, 10) : NaN;
+    return {
+        teamId: teamId || "",
+        leagueId: Number.isNaN(leagueId) ? null : leagueId,
+    };
 }

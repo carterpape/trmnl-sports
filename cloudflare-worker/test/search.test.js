@@ -1,6 +1,44 @@
 import { describe, expect, it } from "vitest";
 
-import { matchRank, searchTeams } from "../lib/search.js";
+import { matchRank, parseTeamParam, searchTeams } from "../lib/search.js";
+
+describe("parseTeamParam", () => {
+    it("parses a real-install param carrying TRMNL's ::label suffix", () => {
+        // TRMNL stores the picked dropdown option as value::label, so a real
+        // device poll sends ID|LEAGUE::Team Name (League) — not the clean
+        // ID|LEAGUE we use in tests/curl. Number() of "4424::Boston…" is NaN
+        // (pape-docs/0081); the leading integer must be parsed out.
+        expect(parseTeamParam("135252|4424::Boston Red Sox (MLB)")).toEqual({
+            teamId: "135252",
+            leagueId: 4424,
+        });
+    });
+
+    it("parses the clean ID|LEAGUE shape (our test/curl traffic)", () => {
+        expect(parseTeamParam("135252|4424")).toEqual({
+            teamId: "135252",
+            leagueId: 4424,
+        });
+    });
+
+    it("yields a null leagueId when the league half is absent", () => {
+        expect(parseTeamParam("135252")).toEqual({
+            teamId: "135252",
+            leagueId: null,
+        });
+    });
+
+    it("yields an empty teamId and null leagueId for an empty param", () => {
+        expect(parseTeamParam("")).toEqual({ teamId: "", leagueId: null });
+    });
+
+    it("yields a null leagueId (not NaN) when the league half isn't numeric", () => {
+        expect(parseTeamParam("135252|nonsense")).toEqual({
+            teamId: "135252",
+            leagueId: null,
+        });
+    });
+});
 
 describe("matchRank", () => {
     const bulls = { strTeam: "Chicago Bulls" };

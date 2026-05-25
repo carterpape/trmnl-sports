@@ -16,7 +16,7 @@ import {
 } from "./lib/localization.js";
 import { classifyNextGameCache, selectNextGame } from "./lib/schedule.js";
 import { formatEvent } from "./lib/format.js";
-import { searchTeams } from "./lib/search.js";
+import { parseTeamParam, searchTeams } from "./lib/search.js";
 import { computeBadgeStats, NO_BADGE_TRIM } from "./lib/badge.js";
 import { classifyClient, classifySource } from "./lib/client.js";
 
@@ -319,8 +319,9 @@ async function handleNextGame(url, env, ctx, m) {
     // The leagueId half drives the league display label in the title bar so it
     // stays consistent with the dropdown (and with the team's home league, not
     // the league of the next match — cup fixtures shouldn't change the label).
-    const [teamId, leagueIdRaw] = teamParam.split("|");
-    const leagueIdFromUrl = leagueIdRaw ? Number(leagueIdRaw) : null;
+    // parseTeamParam strips TRMNL's ::label suffix off the league half so real
+    // device polls hit the URL-leagueId fast path (no fetchTeamMeta) — see 0081.
+    const { teamId, leagueId: leagueIdFromUrl } = parseTeamParam(teamParam);
 
     // Stamp config dimensions from parsed/validated values (so {{...}}
     // placeholders and junk don't inflate cardinality). team/league IDs are
