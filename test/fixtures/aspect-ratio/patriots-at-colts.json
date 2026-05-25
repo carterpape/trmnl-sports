@@ -1,0 +1,28 @@
+{
+    "found": true,
+    "home_team": "Indianapolis Colts",
+    "away_team": "New England Patriots",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/wqqvpx1421434058.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/xtwxyt1421431860.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": {
+        "x": 0.041,
+        "y": 0.0117,
+        "w": 0.916,
+        "h": 0.9766
+    },
+    "away_team_badge_trim": {
+        "x": 0.0039,
+        "y": 0.2695,
+        "w": 0.9922,
+        "h": 0.4609
+    },
+    "start_utc_timestamp": "2026-09-13T17:00:00+00:00",
+    "date_label": "Sunday, September 13",
+    "time_label": "1:00 p.m.",
+    "venue": "Lucas Oil Stadium",
+    "league": "NFL",
+    "team_name": "New England Patriots",
+    "team_league_label": "NFL"
+}

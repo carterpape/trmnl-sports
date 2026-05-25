@@ -1,0 +1,18 @@
+{
+    "found": true,
+    "home_team": "Vegas Golden Knights",
+    "away_team": "Montreal Canadiens",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/7fd4521619536689.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/stpryx1421791753.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": { "x": 0.1289, "y": 0, "w": 0.7402, "h": 1 },
+    "away_team_badge_trim": { "x": 0, "y": 0.162, "w": 1, "h": 0.676 },
+    "start_utc_timestamp": "2026-05-26T00:00:00+00:00",
+    "date_label": "Tuesday, May 26",
+    "time_label": "5:00 p.m.",
+    "venue": "T-Mobile Arena",
+    "league": "NHL",
+    "team_name": "Montreal Canadiens",
+    "team_league_label": "NHL"
+}

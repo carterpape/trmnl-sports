@@ -1,0 +1,18 @@
+{
+    "found": true,
+    "home_team": "New Orleans Saints",
+    "away_team": "Los Angeles Chargers",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/nd46c71537821337.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/vrqanp1687734910.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": { "x": 0.0879, "y": 0, "w": 0.8223, "h": 1 },
+    "away_team_badge_trim": { "x": 0.03, "y": 0.29, "w": 0.932, "h": 0.412 },
+    "start_utc_timestamp": "2026-09-13T17:00:00+00:00",
+    "date_label": "Sunday, September 13",
+    "time_label": "1:00 p.m.",
+    "venue": "Caesars Superdome",
+    "league": "NFL",
+    "team_name": "Los Angeles Chargers",
+    "team_league_label": "NFL"
+}

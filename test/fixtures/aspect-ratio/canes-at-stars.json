@@ -1,0 +1,18 @@
+{
+    "found": true,
+    "home_team": "Dallas Stars",
+    "away_team": "Carolina Hurricanes",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/qrvywq1422042125.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/v07m3x1547232585.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": { "x": 0.002, "y": 0.092, "w": 0.996, "h": 0.818 },
+    "away_team_badge_trim": { "x": 0, "y": 0.1992, "w": 1, "h": 0.6016 },
+    "start_utc_timestamp": "2026-05-26T00:00:00+00:00",
+    "date_label": "Tuesday, May 26",
+    "time_label": "5:00 p.m.",
+    "venue": "American Airlines Center",
+    "league": "NHL",
+    "team_name": "Carolina Hurricanes",
+    "team_league_label": "NHL"
+}

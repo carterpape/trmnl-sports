@@ -1,0 +1,23 @@
+{
+    "found": true,
+    "home_team": "Golden State Valkyries",
+    "away_team": "Seattle Storm",
+    "home_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/24p2fj1738315525.png",
+    "away_team_badge": "https://r2.thesportsdb.com/images/media/team/badge/ygz07x1624031566.png",
+    "home_team_badge_invert": false,
+    "away_team_badge_invert": false,
+    "home_team_badge_trim": { "x": 0.1328, "y": 0, "w": 0.7324, "h": 1 },
+    "away_team_badge_trim": {
+        "x": 0.002,
+        "y": 0.0488,
+        "w": 0.9961,
+        "h": 0.9023
+    },
+    "start_utc_timestamp": "2026-05-26T02:00:00+00:00",
+    "date_label": "Tuesday, May 26",
+    "time_label": "7:00 p.m.",
+    "venue": "Chase Center",
+    "league": "WNBA",
+    "team_name": "Seattle Storm",
+    "team_league_label": "WNBA"
+}

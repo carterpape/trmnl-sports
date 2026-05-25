@@ -21,13 +21,13 @@
   <div class="grid grid--cols-1">
     <div class="row row--center">
       <div class="flex flex--col flex--center-y gap--xsmall no-shrink">
-        {% render "badge", src: away_team_badge, invert: away_team_badge_invert, trim: away_team_badge_trim, size_class: "h--32 lg:h--48 w--max-[42cqw]" %}
+        {% render "badge", src: away_team_badge, invert: away_team_badge_invert, trim: away_team_badge_trim, size_class: "h--32 lg:h--48 w--max-[42cqw]", clamp_aspect: true %}
       </div>
       <div class="flex flex--col flex--center-y gap--xsmall" style="padding: 0 0.5rem;">
         <span class="value value--small lg:value--xlarge">@</span>
       </div>
       <div class="flex flex--col flex--center-y gap--xsmall no-shrink">
-        {% render "badge", src: home_team_badge, invert: home_team_badge_invert, trim: home_team_badge_trim, size_class: "h--32 lg:h--48 w--max-[42cqw]" %}
+        {% render "badge", src: home_team_badge, invert: home_team_badge_invert, trim: home_team_badge_trim, size_class: "h--32 lg:h--48 w--max-[42cqw]", clamp_aspect: true %}
       </div>
     </div>
     <div class="row row--center">
