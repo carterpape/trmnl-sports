@@ -309,6 +309,12 @@ async function handleNextGame(url, env, ctx, m) {
     const type = url.searchParams.get("type") || "any";
     const locale = parseLocale(url.searchParams.get("locale"));
     const tz = parseTimeZone(url.searchParams.get("tz"));
+    // TRMNL's per-device friendly_id (e.g. "93B2E9"), our unique-install proxy.
+    // Same {{...}} guard as locale/tz: local trmnlp can't interpolate trmnl.*
+    // into the polling URL, so it arrives as the literal placeholder → treat as
+    // absent. Empty/placeholder ⇒ not a real device poll.
+    const deviceRaw = url.searchParams.get("device") || "";
+    const device = deviceRaw.includes("{{") ? "" : deviceRaw;
 
     // The leagueId half drives the league display label in the title bar so it
     // stays consistent with the dropdown (and with the team's home league, not
@@ -323,6 +329,7 @@ async function handleNextGame(url, env, ctx, m) {
     m.type = type;
     m.tz = tz;
     m.locale = locale;
+    m.device = device;
 
     if (!teamId) {
         m.outcome = "missing_team";
@@ -502,6 +509,7 @@ function newMetrics(endpoint, method) {
         type: "",
         tz: "",
         locale: "",
+        device: "", // trmnl.device.friendly_id; populated only by real TRMNL device polls
     };
 }
 
@@ -523,6 +531,7 @@ function emit(m, env, request) {
             type: m.type || null,
             tz: m.tz || null,
             locale: m.locale || null,
+            device: m.device || null, // friendly_id; null for non-device traffic
             errorName: m.errorName, // omitted by JSON unless outcome === "error"
             client: m.client,
             source: m.source,
@@ -549,6 +558,7 @@ function emit(m, env, request) {
             m.locale, // blob9
             m.client, // blob10
             m.source, // blob11
+            m.device, // blob12 (trmnl.device.friendly_id; "" for non-device traffic)
         ],
         doubles: [
             m.latencyMs, // double1
@@ -570,14 +580,13 @@ export default {
               ? "next-game"
               : "other";
         const m = newMetrics(endpoint, request.method);
-        // Classify the caller (real TRMNL poll vs. our test traffic) once, up
+        // Bucket the caller's UA (descriptive only) and tag test/prod once, up
         // front, so every path — including OPTIONS, rate-limit, and error —
-        // carries it. ?test=1 is an explicit override; otherwise it's UA-based.
+        // carries it. source is test ONLY when ?test=1 is set; the UA bucket
+        // can't separate real TRMNL polls from our own tooling (see lib/client.js).
+        // The real-install signal is the `device` dimension on /next-game.
         m.client = classifyClient(request.headers.get("user-agent"));
-        m.source = classifySource(
-            m.client,
-            url.searchParams.get("test") === "1",
-        );
+        m.source = classifySource(url.searchParams.get("test") === "1");
 
         let response;
         try {

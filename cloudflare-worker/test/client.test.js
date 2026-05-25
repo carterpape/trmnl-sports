@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { classifyClient, classifySource } from "../lib/client.js";
 
-describe("classifyClient — UA bucket", () => {
-    it("maps Faraday (TRMNL's backend poller) to trmnl", () => {
-        expect(classifyClient("Faraday v2.9.0")).toBe("trmnl");
+describe("classifyClient — descriptive UA bucket", () => {
+    it("maps a Faraday UA to faraday", () => {
+        expect(classifyClient("Faraday v2.9.0")).toBe("faraday");
     });
 
-    it("maps a Ruby UA (local trmnlp preview) to trmnlp", () => {
-        expect(classifyClient("Ruby")).toBe("trmnlp");
+    it("maps a bare Ruby UA to ruby", () => {
+        expect(classifyClient("Ruby")).toBe("ruby");
     });
 
     it("maps curl to curl", () => {
@@ -34,29 +34,24 @@ describe("classifyClient — UA bucket", () => {
     });
 
     it("matches case-insensitively", () => {
-        expect(classifyClient("FARADAY V2.9.0")).toBe("trmnl");
+        expect(classifyClient("FARADAY V2.9.0")).toBe("faraday");
         expect(classifyClient("CURL/8.7.1")).toBe("curl");
     });
 
-    it("prefers the Faraday bucket over Ruby when both could appear", () => {
-        // Defensive: a Faraday UA must never fall through to the trmnlp bucket.
-        expect(classifyClient("Faraday v2.9.0 (ruby)")).toBe("trmnl");
+    it("prefers faraday over ruby when both tokens appear", () => {
+        // A Faraday UA string can also contain "ruby"; it must bucket as faraday.
+        expect(classifyClient("Faraday v2.9.0 (ruby)")).toBe("faraday");
     });
 });
 
 describe("classifySource — test vs prod", () => {
-    it("forces test when the ?test=1 override is set, even for a real client", () => {
-        expect(classifySource("trmnl", true)).toBe("test");
+    it("tags test only when the ?test=1 marker is set", () => {
+        expect(classifySource(true)).toBe("test");
     });
 
-    it("treats our own dev tools as test", () => {
-        expect(classifySource("trmnlp", false)).toBe("test");
-        expect(classifySource("curl", false)).toBe("test");
-    });
-
-    it("treats the real poller, browsers, and unknown clients as prod", () => {
-        expect(classifySource("trmnl", false)).toBe("prod");
-        expect(classifySource("browser", false)).toBe("prod");
-        expect(classifySource("other", false)).toBe("prod");
+    it("tags everything unmarked as prod, regardless of UA", () => {
+        // The key fix: real TRMNL polls (bare Ruby UA) must NOT be tagged test
+        // just because they share a UA with our local trmnlp tooling.
+        expect(classifySource(false)).toBe("prod");
     });
 });

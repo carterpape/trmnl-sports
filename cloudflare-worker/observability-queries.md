@@ -21,16 +21,17 @@ This file is the canonical record of the **AE column contract** plus the canonic
 | `blob7` | type | `any` / `home` / `away` |
 | `blob8` | tz | parsed IANA time zone |
 | `blob9` | locale | parsed locale |
-| `blob10` | client | UA bucket: `trmnl` (TRMNL's Faraday poller) / `trmnlp` (local preview) / `curl` / `browser` / `other` |
-| `blob11` | source | `test` / `prod` — `test` = `?test=1` override or one of our own dev tools (`trmnlp`/`curl`); everything else (incl. unknown UAs) is `prod` |
+| `blob10` | client | **descriptive** UA bucket: `faraday` / `ruby` / `curl` / `browser` / `other`. ⚠️ NOT provenance — TRMNL polls with both `ruby` (device-checkin, the bulk of real traffic) and `faraday` (preview/`team=0`), and our local tooling shares those UAs. Do not infer test/real from this. |
+| `blob11` | source | `test` / `prod` — `test` **only** when `?test=1` is present (our tools/manual hits set it); everything else is `prod`. (Earlier this also auto-tagged the `ruby`/`curl` buckets as test, which hid real TRMNL device traffic — removed.) |
+| `blob12` | device | `trmnl.device.friendly_id` (e.g. `93B2E9`), `next-game` only. **Populated only by real TRMNL device polls** — local `trmnlp` sends the literal `{{...}}` placeholder (not interpolated) and curl sends nothing, both stored as `''`. This is the reliable real-install signal. |
 | `double1` | latencyMs | wall-clock request duration |
 | `double2` | status | HTTP status code |
 | `double3` | upstreamCalls | primary SportsDB calls issued (0, 1, or ~20 on a teams rebuild) |
 | `double4` | upstreamFails | how many of those calls failed |
 
-Extension point: new dimensions append at `blob12+` / `double5+` (e.g. sub-fetch volume from `fetchTeamMeta`/`shouldInvertBadge`, deliberately not tracked in v1).
+Extension point: new dimensions append at `blob13+` / `double5+` (e.g. sub-fetch volume from `fetchTeamMeta`/`shouldInvertBadge`, deliberately not tracked in v1).
 
-**Filtering out our own test traffic:** the canonical queries below count *all* traffic. For a real-world read, add `AND blob11 = 'prod'` (excludes `?test=1` calls + our `trmnlp`/`curl` traffic) — or, for the tightest "confirmed real installs" view, `AND blob10 = 'trmnl'`. The Workers Logs line carries the raw `ua` alongside `client`/`source`, so the buckets can be refined later without redeploying (e.g. if TRMNL's poller UA ever drifts off Faraday, it shows up as a rising `other` rather than silently misclassifying).
+**Reading real (non-test) traffic — use `device`, not `client`/`source`.** The UA buckets cannot separate real TRMNL polls from our own tooling (both use `ruby`/`faraday`), so the gold-standard real-install filter on `next-game` is **`AND blob12 != ''`** (a populated friendly_id ⇒ a real device poll; excludes our local trmnlp/curl, which lack one). `AND blob11 = 'prod'` additionally drops anything explicitly `?test=1`-marked, but on its own it now *includes* our un-tagged local tooling — so prefer the `device` filter, or combine both. The Workers Logs line carries the raw `ua` + `device` so buckets can be refined later without redeploying.
 
 ## Running a query
 
@@ -90,17 +91,28 @@ GROUP BY day, endpoint
 ORDER BY day, endpoint
 ```
 
-### Distinct config tuples — install proxy (next-game, last 24h)
+### Distinct devices — unique-install proxy (next-game, last 24h)
 
-A rough lower-bound proxy for active installs. `COUNT(DISTINCT ...)` is a cardinality, not a weighted sum, so it is exact only while unsampled (true at this volume); under sampling it would undercount.
+The headline adoption number. `blob12` is `trmnl.device.friendly_id`, so distinct devices ≈ unique installs (a multi-device user counts once per device, so this should roughly track TRMNL's "connections" count — a cross-check on a number the worker otherwise can't see). `COUNT(DISTINCT ...)` is a cardinality, exact only while unsampled (true at this volume).
 
 ```sql
-SELECT COUNT(DISTINCT concat(blob6, '|', blob7, '|', blob8, '|', blob9)) AS distinct_configs
+SELECT COUNT(DISTINCT blob12) AS distinct_devices
 FROM trmnl_sports_requests
 WHERE timestamp > NOW() - INTERVAL '1' DAY
     AND index1 = 'next-game'
-    AND blob6 != ''
+    AND blob12 != ''
 ```
+
+To see *which* teams the install base follows (popular-team curiosity), group real-device traffic by team:
+
+```sql
+SELECT blob6 AS team, COUNT(DISTINCT blob12) AS devices, SUM(_sample_interval) AS polls
+FROM trmnl_sports_requests
+WHERE timestamp > NOW() - INTERVAL '7' DAY AND index1 = 'next-game' AND blob12 != ''
+GROUP BY team ORDER BY devices DESC, polls DESC
+```
+
+(The older config-tuple proxy — `COUNT(DISTINCT concat(blob6,'|',blob7,'|',blob8,'|',blob9))` filtered on `blob6 != ''` — predates `device` and is a weaker stand-in; prefer `blob12` now that it exists.)
 
 ### Latency p50 / p95, per endpoint (last 24h)
 
@@ -143,17 +155,18 @@ WHERE timestamp > NOW() - INTERVAL '1' DAY
 GROUP BY outcome
 ```
 
-### Traffic by client + source (last 24h)
+### Traffic by client + source + has-device (last 24h)
 
-Sanity-check the test/real split: confirms our own `trmnlp`/`curl` testing is being tagged `test` and real polls land in `prod` (`client = 'trmnl'`). A `client = 'other'` spike in `prod` is the signal to inspect raw UAs in Workers Logs (TRMNL's poller UA may have drifted off Faraday).
+Descriptive breakdown only — remember `client`/`source` do NOT cleanly separate real TRMNL from our tooling (that's what `device` is for). Real TRMNL device polls land in `client = 'ruby'` (and some `faraday`) with a populated `device`; a row with `device_present = 1` is genuine regardless of `source`. Use this to eyeball UA distribution and confirm `device` is populating after a deploy.
 
 ```sql
 SELECT
     blob10 AS client,
     blob11 AS source,
+    IF(blob12 != '', 1, 0) AS device_present,
     SUM(_sample_interval) AS n
 FROM trmnl_sports_requests
 WHERE timestamp > NOW() - INTERVAL '1' DAY
-GROUP BY client, source
+GROUP BY client, source, device_present
 ORDER BY n DESC
 ```

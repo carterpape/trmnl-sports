@@ -57,6 +57,7 @@ export function decodeDatapoint(dp) {
         locale,
         client,
         source,
+        device,
     ] = dp.blobs;
     const [latencyMs, status, upstreamCalls, upstreamFails] = dp.doubles;
     return {
@@ -72,6 +73,7 @@ export function decodeDatapoint(dp) {
         locale,
         client,
         source,
+        device,
         latencyMs,
         status,
         upstreamCalls,
