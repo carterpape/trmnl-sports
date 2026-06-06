@@ -10,7 +10,7 @@
 # Hermetic: it serves the fixtures in test/fixtures/next-game-responses/ over a
 # local static server and points trmnlp's polling_url at them, so edge states
 # the live backend won't produce on demand (stale, outage, long names) render
-# exactly. It drives .claude/scripts/trmnl-preview.sh (headless Firefox + e-ink
+# exactly. It drives ../utilities/trmnl-preview.sh (headless Firefox + e-ink
 # dithering) per fixture × view.
 #
 # ⚠️  trmnlp reads its config (and re-polls) only at startup, so the server is
@@ -35,7 +35,7 @@ USAGE
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="$PLUGIN_DIR/test/fixtures/next-game-responses"
-PREVIEW="$PLUGIN_DIR/../.claude/scripts/trmnl-preview.sh"
+PREVIEW="$PLUGIN_DIR/../utilities/trmnl-preview.sh"
 TRMNLP_YML="$PLUGIN_DIR/.trmnlp.yml"
 OUT_DIR="${TMPDIR:-/tmp}/trmnl-sports-gallery"
 
